@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.7.1" category="social" icon="tv"
+     version="1.7.2" category="social" icon="tv"
      description="查看 B 站账户、视频统计变化和私信会话；整体每 6 小时刷新，私信默认每 10 分钟刷新。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -886,7 +886,8 @@ function Messages() {
     features.message_system ? message("系统通知", n?.system, "notice-system", "system") : null,
     features.message_assistant ? message("UP 主助手", n?.assistant, "notice-assistant", "up") : null,
   ].filter(Boolean);
-  return h("Column", { gap: 8, width: "100%" }, privateEnabled() ? sectionError("private") : null,
+  // Native scrollbars overlay the viewport; keep message content clear of the trailing rail.
+  return h("Column", { gap: 8, width: "100%", minWidth: 0, paddingRight: 16 }, privateEnabled() ? sectionError("private") : null,
     notificationsEnabled() ? sectionError("notifications") : null,
     list ? ConversationList() : null,
     list && cards.length ? note("其他通知", { fontWeight: 500 }) : null,
