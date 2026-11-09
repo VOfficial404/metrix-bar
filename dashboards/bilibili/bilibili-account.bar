@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.6.0" category="social" icon="tv"
+     version="1.7.0" category="social" icon="tv"
      description="查看 B 站账户、视频统计变化和私信会话；整体每 6 小时刷新，私信默认每 10 分钟刷新。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -39,6 +39,10 @@
       <option value="3" label="3 条" />
       <option value="5" label="5 条" />
       <option value="10" label="10 条" />
+    </input>
+    <input name="private_card_size" type="select" label="消息 · 会话卡片尺寸" default="normal">
+      <option value="compact" label="紧凑" />
+      <option value="normal" label="正常" />
     </input>
     <input name="private_refresh" type="select" label="消息 · 私信刷新频率" default="10m">
       <option value="5m" label="5 分钟" />
@@ -112,7 +116,7 @@ const stamp = time => {
 const launch = url => () => $metrix.openURL(url);
 let credential = "", inputError = "", videoLimit = 5, initialized = false, generation = 0;
 let account = null, followers = null, videos = null, privateMessages = null, notifications = null;
-let privateDisplay = "summary", privateLimit = 5, conversations = null;
+let privateDisplay = "summary", privateLimit = 5, privateCardSize = "normal", conversations = null;
 let times = {}, errors = {}, loading = false, inflight = null, inflightGeneration = -1, refreshController = null;
 let tab = "account";
 // --stage-* maps to native background/text/textMuted/border/surface/accent/accentText.
@@ -358,6 +362,7 @@ async function pollLogin(version) {
 
 function sync(env) {
   lastEnv = env;
+  privateCardSize = env.inputs.private_card_size === "compact" ? "compact" : "normal";
   let next = "";
   try { next = String($metrix.secret("sessdata") || "").trim(); } catch {}
   const limit = Number(env.inputs.video_count || "5");
@@ -838,25 +843,30 @@ function Videos() {
   return h("Column", { gap: 8, width: "100%" }, sectionError("videos"), items);
 }
 function ConversationList() {
+  const dense = privateCardSize === "compact";
   let items;
   if (conversations === null) items = note(loading || privateInflight ? "正在读取私信会话…" : "私信会话尚不可用", { key: "conversations-pending" });
   else if (!conversations.length) items = note("暂无用户私信会话", { key: "no-conversations", paddingY: 24, textAlign: "center" });
-  else items = conversations.map(row => h("ButtonBase", { key: "private-session-" + row.uid, width: "100%", minWidth: 0,
-    padding: 12, radius: 12, background: "surfaceHover", ...pressStyle(), hover: { background: "surfacePressed" }, focusRing: true,
-    label: row.name + "的私信会话", onClick: launch("https://message.bilibili.com/#/whisper/mid" + row.uid) },
-    h("Column", { width: "100%", minWidth: 0, gap: 8 },
-      h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "center" },
-        h("Avatar", { name: row.name, ...(row.avatar ? { src: row.avatar } : {}), width: 36, height: 36,
-          radius: 18, fit: "cover", shrink: 0, label: row.name + "的头像" }),
-        h("Column", { grow: 1, minWidth: 0, gap: 2 },
-          text(row.name, { key: "conversation-name-" + row.uid, fontSize: 13, fontWeight: 500, singleLine: true, tooltip: row.name }),
-          note("UID " + row.uid, { key: "conversation-uid-" + row.uid, fontSize: 10, singleLine: true })),
-        row.unread ? text(comma(row.unread), { key: "conversation-unread-" + row.uid, fontSize: 11, fontWeight: 600,
-          paddingX: 6, height: 20, radius: 10, background: "accentSubtle", textColor: "accent", shrink: 0,
-          label: comma(row.unread) + "条未读私信" }) : null),
-      text(row.preview, { key: "conversation-preview-" + row.uid, fontSize: 12, textColor: "textMuted", maxLines: 2, wrap: true, minWidth: 0 }),
-      note(stamp(row.at), { key: "conversation-time-" + row.uid, fontSize: 10, singleLine: true }))));
-  return h("Column", { key: "private-conversations", width: "100%", minWidth: 0, gap: 8 },
+  else items = conversations.map(row => {
+    const preview = text(row.preview, { key: "conversation-preview-" + row.uid, fontSize: 12, textColor: "textMuted",
+      maxLines: dense ? 1 : 2, wrap: !dense, singleLine: dense, minWidth: 0, tooltip: row.preview, ...(dense ? { grow: 1 } : {}) });
+    const time = note(stamp(row.at), { key: "conversation-time-" + row.uid, fontSize: dense ? 9 : 10, singleLine: true, shrink: 0 });
+    return h("ButtonBase", { key: "private-session-" + row.uid, width: "100%", minWidth: 0,
+      padding: dense ? 8 : 12, radius: 12, background: "surfaceHover", ...pressStyle(), hover: { background: "surfacePressed" }, focusRing: true,
+      label: row.name + "的私信会话", onClick: launch("https://message.bilibili.com/#/whisper/mid" + row.uid) },
+      h("Column", { width: "100%", minWidth: 0, gap: dense ? 4 : 8 },
+        h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "center" },
+          h("Avatar", { name: row.name, ...(row.avatar ? { src: row.avatar } : {}), width: dense ? 28 : 36, height: dense ? 28 : 36,
+            radius: dense ? 14 : 18, fit: "cover", shrink: 0, label: row.name + "的头像" }),
+          h("Column", { grow: 1, minWidth: 0, gap: dense ? 1 : 2 },
+            text(row.name, { key: "conversation-name-" + row.uid, fontSize: dense ? 12 : 13, fontWeight: 500, singleLine: true, tooltip: row.name }),
+            note("UID " + row.uid, { key: "conversation-uid-" + row.uid, fontSize: dense ? 9 : 10, singleLine: true })),
+          row.unread ? text(comma(row.unread), { key: "conversation-unread-" + row.uid, fontSize: 11, fontWeight: 600,
+            paddingX: 6, height: 20, radius: 10, background: "accentSubtle", textColor: "accent", shrink: 0,
+            label: comma(row.unread) + "条未读私信" }) : null),
+        dense ? h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "center" }, preview, time) : [preview, time]));
+  });
+  return h("Column", { key: "private-conversations", width: "100%", minWidth: 0, gap: dense ? 4 : 8 },
     h("Row", { width: "100%", gap: 8, alignItems: "center", tooltip: "会话更新：" + stamp(times.conversations) },
       text("最近私信", { fontSize: 12, fontWeight: 500, grow: 1 }),
       note("未读"), text(comma(privateMessages?.total), { key: "private-total", fontSize: 12, fontFeatures: "tnum" })),
