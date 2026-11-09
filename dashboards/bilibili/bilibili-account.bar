@@ -1,6 +1,6 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.4.1" category="social" icon="tv"
-     description="按需查看 B 站账户、粉丝、视频和未读消息，每 6 小时刷新。"
+     version="1.5.0" category="social" icon="tv"
+     description="查看 B 站账户、视频统计变化和未读消息；整体每 6 小时刷新，私信默认每 10 分钟刷新。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
   <permissions>
@@ -31,6 +31,13 @@
     <input name="show_video_comments" type="bool" label="视频 · 评论数" default="true" />
     <input name="show_messages" type="bool" label="消息 · 启用消息页" default="true" />
     <input name="show_message_private" type="bool" label="消息 · 未读私信" default="true" />
+    <input name="private_refresh" type="select" label="消息 · 私信刷新频率" default="10m">
+      <option value="5m" label="5 分钟" />
+      <option value="10m" label="10 分钟" />
+      <option value="30m" label="30 分钟" />
+      <option value="1h" label="1 小时" />
+      <option value="6h" label="6 小时" />
+    </input>
     <input name="show_message_likes" type="bool" label="消息 · 收到的赞" default="true" />
     <input name="show_message_replies" type="bool" label="消息 · 回复我的" default="true" />
     <input name="show_message_mentions" type="bool" label="消息 · @ 我的" default="true" />
@@ -114,6 +121,13 @@ let features = Object.fromEntries(FEATURE_KEYS.map(key => [key, true])), tabs = 
 const privateEnabled = () => features.messages && features.message_private;
 const notificationsEnabled = () => features.messages && NOTIFICATION_FEATURE_KEYS.some(key => features[key]);
 const messagesEnabled = () => privateEnabled() || notificationsEnabled();
+const PRIVATE_RATES = {
+  "5m": { ms: 300000, label: "5 分钟" }, "10m": { ms: 600000, label: "10 分钟" },
+  "30m": { ms: 1800000, label: "30 分钟" }, "1h": { ms: 3600000, label: "1 小时" },
+  "6h": { ms: 21600000, label: "6 小时" },
+};
+let privateRate = "10m", privateLive = false, privateTimer = null, privateInflight = null;
+let privateController = null, privateAttemptAt = 0;
 const MOTION = { tabs: 250, page: 250, distance: 8, blur: 3, press: 150, spin: 500, spinReset: 900, bar: 400 };
 // Heroicons outline refresh icon: Copyright (c) Tailwind Labs, Inc., MIT.
 // The MIT permission and warranty notice bundled above also applies to this icon.
@@ -337,15 +351,19 @@ function sync(env) {
   let next = "";
   try { next = String($metrix.secret("sessdata") || "").trim(); } catch {}
   const limit = Number(env.inputs.video_count || "5");
+  const rate = PRIVATE_RATES[env.inputs.private_refresh]?.ms ? env.inputs.private_refresh : "10m";
   const nextFeatures = Object.fromEntries(FEATURE_KEYS.map(key => [key, env.inputs["show_" + key] !== false]));
   const featuresChanged = FEATURE_KEYS.some(key => nextFeatures[key] !== features[key]);
-  if (initialized && next === credential && limit === videoLimit && !featuresChanged) return;
+  if (initialized && next === credential && limit === videoLimit && rate === privateRate && !featuresChanged) return;
   const changedAccount = !initialized || next !== credential;
   initialized = true;
   generation++;
   refreshController?.abort();
+  cancelPrivateRefresh();
   credential = next;
   videoLimit = [3, 5, 10].includes(limit) ? limit : 5;
+  if (rate !== privateRate) privateAttemptAt = Date.now();
+  privateRate = rate;
   features = nextFeatures;
   tabs = TABS.filter(item => item.id === "account" ? features.identity || features.followers || features.level
     : item.id === "messages" ? messagesEnabled() : features[item.id]);
@@ -358,6 +376,7 @@ function sync(env) {
     account = followers = videos = privateMessages = notifications = null;
     times = {};
     errors = {};
+    privateAttemptAt = 0;
   }
   if (!features.followers) {
     followers = null;
@@ -373,12 +392,14 @@ function sync(env) {
     privateMessages = null;
     delete times.private;
     delete errors.private;
+    privateAttemptAt = 0;
   }
   if (!notificationsEnabled()) {
     notifications = null;
     delete times.notifications;
     delete errors.notifications;
   }
+  armPrivateRefresh();
 }
 
 class RequestError extends Error {}
@@ -490,6 +511,26 @@ async function loadVideos(uid, session, signal, limit) {
   }
   return selected.sort((a, b) => b.published - a.published).slice(0, limit);
 }
+function sampleVideos(uid, rows) {
+  const key = "videos:v1:" + uid, now = Date.now(), samples = {};
+  let previous = null;
+  try { previous = JSON.parse(localStorage.getItem(key) || "null"); } catch {}
+  const result = rows.map(video => {
+    const prior = previous?.[video.id];
+    const usable = prior && metric(prior.at) && prior.at <= now;
+    const sample = { at: now }, delta = {};
+    for (const { field } of VIDEO_STATS) {
+      if (count(video[field])) {
+        sample[field] = video[field];
+        delta[field] = usable && count(prior[field]) ? video[field] - prior[field] : null;
+      } else delta[field] = null;
+    }
+    samples[video.id] = sample;
+    return { ...video, delta, since: usable ? prior.at : null };
+  });
+  localStorage.setItem(key, JSON.stringify(samples));
+  return result;
+}
 async function load(session, limit, version, signal) {
   const next = readAccount(await get(API, "/x/web-interface/nav", session, signal));
   if (version !== generation) return;
@@ -506,11 +547,10 @@ async function load(session, limit, version, signal) {
       }
     } catch {}
   }
+  const privateRefresh = privateEnabled() ? refreshPrivate(session, version, signal) : Promise.resolve();
   const tasks = [];
   if (features.followers) tasks.push(
     ["followers", () => get(API, "/x/relation/stat?vmid=" + next.uid, session, signal), data => { followers = sampleFollowers(next.uid, data); }]);
-  if (privateEnabled()) tasks.push(
-    ["private", () => get(IM, "/session_svr/v1/session_svr/single_unread?unread_type=0&show_unfollow_list=1&show_dustbin=1&build=0&mobi_app=web", session, signal), data => { privateMessages = readPrivate(data); }]);
   if (notificationsEnabled()) tasks.push(
     ["notifications", () => get(IM, "/x/im/web/msgfeed/unread?build=0&mobi_app=web", session, signal), data => { notifications = readNotifications(data); }]);
   const results = await Promise.allSettled(tasks.map(async ([key, request, apply]) => {
@@ -520,6 +560,7 @@ async function load(session, limit, version, signal) {
     times[key] = Date.now();
     delete errors[key];
   }));
+  await privateRefresh;
   if (version !== generation) return;
   results.forEach((result, i) => {
     if (result.status === "rejected") errors[tasks[i][0]] = safeError(result.reason);
@@ -527,7 +568,7 @@ async function load(session, limit, version, signal) {
   if (features.videos) try {
     const result = await loadVideos(next.uid, session, signal, limit);
     if (version !== generation) return;
-    videos = result;
+    videos = sampleVideos(next.uid, result);
     times.videos = Date.now();
     delete errors.videos;
   } catch (error) { if (version === generation) errors.videos = safeError(error); }
@@ -552,8 +593,59 @@ function refresh() {
       inflight = null;
       loading = false;
       $metrix.invalidate();
+      armPrivateRefresh();
     });
   return inflight;
+}
+function cancelPrivateRefresh() {
+  clearTimeout(privateTimer);
+  privateTimer = null;
+  const controller = privateController;
+  privateController = null;
+  privateInflight = null;
+  controller?.abort();
+}
+function armPrivateRefresh() {
+  clearTimeout(privateTimer);
+  privateTimer = null;
+  if (!privateLive || !privateEnabled() || inputError || !account || privateInflight) return;
+  const interval = PRIVATE_RATES[privateRate].ms;
+  const due = privateAttemptAt ? privateAttemptAt + interval : Date.now() + interval;
+  privateTimer = setTimeout(() => {
+    privateTimer = null;
+    void refreshPrivate();
+  }, Math.max(0, due - Date.now()));
+}
+function refreshPrivate(session = credential, version = generation, parentSignal) {
+  if (version !== generation || inputError || !privateEnabled() || !account || parentSignal?.aborted) return Promise.resolve();
+  if (privateInflight) return privateInflight;
+  clearTimeout(privateTimer);
+  privateTimer = null;
+  const controller = new AbortController(), cancel = () => controller.abort();
+  const timeout = setTimeout(cancel, 12000);
+  parentSignal?.addEventListener("abort", cancel, { once: true });
+  privateController = controller;
+  privateAttemptAt = Date.now();
+  privateInflight = get(IM, "/session_svr/v1/session_svr/single_unread?unread_type=0&show_unfollow_list=1&show_dustbin=1&build=0&mobi_app=web", session, controller.signal)
+    .then(readPrivate)
+    .then(value => {
+      if (version !== generation || !privateEnabled()) return;
+      privateMessages = value;
+      times.private = Date.now();
+      delete errors.private;
+    })
+    .catch(error => { if (version === generation && privateEnabled()) errors.private = safeError(error); })
+    .finally(() => {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", cancel);
+      if (privateController === controller) {
+        privateController = null;
+        privateInflight = null;
+        armPrivateRefresh();
+      }
+      $metrix.invalidate();
+    });
+  return privateInflight;
 }
 function note(value, props = {}) {
   return text(value, { fontSize: 12, lineHeight: 1.333333, textColor: "textMuted", ...props });
@@ -620,8 +712,15 @@ function Videos() {
   else if (videos.length === 0) items = note("还没有公开发布的视频", { key: "no-videos", paddingY: 24, textAlign: "center" });
   else items = videos.slice(0, videoLimit).map(video => {
     const stats = VIDEO_STATS.filter(({ option }) => features[option]);
-    const cells = stats.map(({ label, field }) => h("Column", { gap: 0, minWidth: 0, tooltip: comma(video[field]) },
-      note(label), text(compact(video[field]), { key: video.id + "-" + label, fontSize: 13, fontFeatures: "tnum", singleLine: true })));
+    const cells = stats.map(({ label, field }) => {
+      const delta = video.delta?.[field] ?? null;
+      const change = delta == null ? "—" : (delta > 0 ? "+" : delta < 0 ? "-" : "") + compact(Math.abs(delta));
+      const comparison = delta == null ? "首次成功采样，建立对比基线" : "较 " + stamp(video.since) + "：" + signed(delta);
+      return h("Column", { gap: 0, minWidth: 0, tooltip: comma(video[field]) + "\n" + comparison },
+        note(label), text(compact(video[field]), { key: video.id + "-" + label, fontSize: 13, fontFeatures: "tnum", singleLine: true }),
+        text(change, { key: "delta-" + video.id + "-" + field, fontSize: 10, minWidth: 0, singleLine: true,
+          fontFeatures: "tnum", textColor: delta > 0 ? "success" : delta < 0 ? "danger" : "textMuted" }));
+    });
     const heading = h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "center" },
       features.video_cover && video.cover ? h("Image", { key: video.id + "-cover", src: video.cover, width: 88, height: 50,
         fit: "cover", radius: 6, clip: true, shrink: 0, label: video.title + "封面" }) : null,
@@ -641,7 +740,8 @@ function Messages() {
   const message = (label, value, key, path, tooltip) => tile(label, comma(value), key, { onClick: launch(root + path), tooltip });
   const cards = [
     privateEnabled() ? message("未读私信", privateMessages?.total, "private-total", "whisper",
-      "已关注 " + comma(privateMessages?.followed) + " · 未关注 " + comma(privateMessages?.unfollowed) + " · 拦截 " + comma(privateMessages?.intercepted) + "（拦截单列）") : null,
+      "已关注 " + comma(privateMessages?.followed) + " · 未关注 " + comma(privateMessages?.unfollowed) + " · 拦截 " + comma(privateMessages?.intercepted)
+        + "（拦截单列）\n更新：" + stamp(times.private) + " · 每 " + PRIVATE_RATES[privateRate].label) : null,
     features.message_likes ? message("收到的赞", n?.likes, "notice-likes", "love") : null,
     features.message_replies ? message("回复我的", n?.reply, "notice-reply", "reply") : null,
     features.message_mentions ? message("@ 我的", n?.at, "notice-at", "at") : null,
@@ -756,8 +856,8 @@ function panel(env) {
           h("Loading", { size: 24, label: "读取账户" }), note("正在读取账户…"))),
     h("Box", { height: 1, width: "100%", linearGradient: { stops: [
       { at: 0, color: "surface" }, { at: 0.2, color: "border" }, { at: 0.8, color: "border" }, { at: 1, color: "surface" }] } }),
-    connected ? note("账户 " + stamp(times.account) + " · 每 6 小时自动刷新", { singleLine: true,
-      tooltip: [features.followers ? "粉丝 " + stamp(times.followers) : null,
+    connected ? note("整体每 6 小时" + (privateEnabled() ? " · 私信每 " + PRIVATE_RATES[privateRate].label : ""), { singleLine: true,
+      tooltip: ["账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
         features.videos ? "视频 " + stamp(times.videos) : null,
         privateEnabled() ? "私信 " + stamp(times.private) : null,
         notificationsEnabled() ? "通知 " + stamp(times.notifications) : null].filter(Boolean).join(" · ") })
@@ -781,8 +881,17 @@ export default {
       await startLogin();
       await $metrix.panel.open();
     }
-    if (name === "lifecycle" && payload?.type === "start") startMotion();
+    if (name === "lifecycle" && payload?.type === "start") {
+      startMotion();
+      if (!privateLive) privateAttemptAt = Date.now();
+      privateLive = true;
+      armPrivateRefresh();
+    }
     if (name === "lifecycle" && payload?.type === "stop") {
+      generation++;
+      refreshController?.abort();
+      privateLive = false;
+      cancelPrivateRefresh();
       uiLive = false;
       stopMotion();
       reducedQuery?.removeEventListener("change", motionPreferenceChanged);

@@ -12,6 +12,36 @@ const FANS = "/x/relation/stat";
 const LIST = "/x/web/archives";
 const VIEW = "/x/web-interface/view";
 const ok = data => ({ code: 0, data });
+const PRIVATE = "/session_svr/v1/session_svr/single_unread";
+const VIDEO_STATS = [
+  ["views", "view", "播放", "show_video_views"],
+  ["likes", "like", "点赞", "show_video_likes"],
+  ["favorites", "favorite", "收藏", "show_video_favorites"],
+  ["coins", "coin", "投币", "show_video_coins"],
+  ["replies", "reply", "评论", "show_video_comments"],
+];
+const deltaKey = (id, field) => ["delta", id, field].join("-");
+const counterKey = (id, label) => [id, label].join("-");
+const privatePayload = total => ok({ follow_unread: total, unfollow_unread: 0, dustbin_unread: 0 });
+
+function videoFeed() {
+  const state = { uid: 12345, failure: null, videos: [
+    { id: "BVDeltaA", published: 200, stat: { view: 20000, like: 20000, favorite: 20000, coin: 20000, reply: 20000 } },
+    { id: "BVDeltaB", published: 100, stat: { view: 40, like: 40, favorite: 40, coin: 40, reply: 40 } },
+  ] };
+  const intercept = url => {
+    if (url.pathname === NAV) return nav(state.uid);
+    if (url.pathname === FANS) return ok({ mid: state.uid, follower: 1200, following: 88 });
+    if (url.pathname === LIST) return state.failure === "list" ? { code: -352 } : ok({ arc_audits: state.videos.map(video =>
+      ({ Archive: { bvid: video.id, ptime: video.published, state: 0 } })), page: { pn: 1, ps: 30, count: state.videos.length } });
+    if (url.pathname === VIEW) {
+      if (state.failure === "detail") return { code: -352 };
+      const video = state.videos.find(video => video.id === url.searchParams.get("bvid"));
+      return ok({ ...detail(video.id, video.published, state.uid).data, stat: { ...video.stat } });
+    }
+  };
+  return { state, intercept };
+}
 
 // Exercise the actual .bar module with an isolated clock, session and storage.
 function worker({ store = new Map(), intercept = () => undefined, secret = "fixture-session", saveSecret, inputs = {} } = {}) {
@@ -606,6 +636,391 @@ describe("Bilibili dashboard behavior", () => {
       expect(w.state.saved).toEqual([]);
       expect(find(w.render(), "login-qr")).toBeUndefined();
       expect(find(w.render(), "login-start").props.disabled).toBe(false);
+    }
+  });
+});
+
+describe("persistent per-video statistic changes", () => {
+  test("first samples have no delta and all five counters show signed compact gains, losses and zero", async () => {
+    const { state, intercept } = videoFeed();
+    const w = worker({ intercept });
+    await w.refresh();
+    w.select("videos");
+    for (const [field, , label] of VIDEO_STATS) {
+      expect(value(w, counterKey("BVDeltaA", label))).toBe("2万");
+      expect(value(w, deltaKey("BVDeltaA", field))).toBe("—");
+      expect(value(w, deltaKey("BVDeltaB", field))).toBe("—");
+    }
+    w.clock.now += 21600000;
+    for (const [, api] of VIDEO_STATS) state.videos[0].stat[api] = 32345;
+    await w.refresh();
+    for (const [field, , label] of VIDEO_STATS) {
+      expect(value(w, counterKey("BVDeltaA", label))).toBe("3.2万");
+      expect(value(w, deltaKey("BVDeltaA", field))).toBe("+1.2万");
+      expect(value(w, deltaKey("BVDeltaB", field))).toBe("0");
+    }
+    w.clock.now += 21600000;
+    for (const [, api] of VIDEO_STATS) state.videos[0].stat[api] = 20000;
+    await w.refresh();
+    for (const [field] of VIDEO_STATS) expect(value(w, deltaKey("BVDeltaA", field))).toBe("-1.2万");
+  });
+
+  test("reordering videos compares BVIDs and persists only selected numeric samples and timestamps", async () => {
+    const { state, intercept } = videoFeed();
+    const w = worker({ intercept });
+    await w.refresh();
+    const firstTimestamp = w.clock.now;
+    w.clock.now += 21600000;
+    state.videos[0].published = 50;
+    state.videos[0].stat.view += 7;
+    state.videos[1].published = 300;
+    state.videos[1].stat.view -= 3;
+    state.videos.reverse();
+    await w.refresh();
+    w.select("videos");
+    const cards = nodes(w.render()).filter(node => ["BVDeltaA", "BVDeltaB"].includes(node.props?.key)).map(node => node.props.key);
+    expect(cards).toEqual(["BVDeltaB", "BVDeltaA"]);
+    expect(value(w, deltaKey("BVDeltaA", "views"))).toBe("+7");
+    expect(value(w, deltaKey("BVDeltaB", "views"))).toBe("-3");
+    state.videos.push(
+      { id: "BVDeltaC", published: 200, stat: { ...state.videos[0].stat } },
+      { id: "BVDeltaD", published: 100, stat: { ...state.videos[0].stat } });
+    w.env.inputs.video_count = "3";
+    w.clock.now += 21600000;
+    await w.refresh();
+    const saved = w.store.get(["videos", "v1", state.uid].join(":"));
+    expect(saved).toBeDefined();
+    expect(saved).toContain("BVDeltaB");
+    expect(saved).not.toContain("BVDeltaA");
+    const leaves = value => value !== null && typeof value === "object" ? Object.values(value).flatMap(leaves) : [value];
+    const numbers = leaves(JSON.parse(saved));
+    expect(numbers.every(value => typeof value === "number" && Number.isFinite(value))).toBe(true);
+    expect(numbers).toContain(w.clock.now);
+    expect(numbers).not.toContain(firstTimestamp);
+  });
+
+  test("discovery and detail failures retain the successful video baseline until recovery", async () => {
+    const { state, intercept } = videoFeed();
+    const w = worker({ intercept });
+    await w.refresh();
+    const key = ["videos", "v1", state.uid].join(":");
+    const saved = w.store.get(key);
+    for (const failure of ["list", "detail"]) {
+      state.failure = failure;
+      state.videos[0].stat.view += 10;
+      w.clock.now += 21600000;
+      await w.refresh();
+      expect(w.store.get(key)).toBe(saved);
+      expect(value(w, counterKey("BVDeltaA", "播放"))).toBe("2万");
+      expect(value(w, deltaKey("BVDeltaA", "views"))).toBe("—");
+      expect(find(w.render(), "error-videos")).toBeDefined();
+    }
+    state.failure = null;
+    state.videos[0].stat.view += 5;
+    await w.refresh();
+    expect(value(w, deltaKey("BVDeltaA", "views"))).toBe("+25");
+    expect(find(w.render(), "error-videos")).toBeUndefined();
+  });
+
+  test("restart restores video baselines and another UID never inherits their changes", async () => {
+    const { state, intercept } = videoFeed();
+    const first = worker({ intercept });
+    await first.refresh();
+    state.videos[0].stat.view += 12;
+    const restarted = worker({ store: first.store, intercept });
+    restarted.clock.now += 21600000;
+    await restarted.refresh();
+    expect(value(restarted, deltaKey("BVDeltaA", "views"))).toBe("+12");
+    const firstUID = state.uid;
+    const saved = restarted.store.get(["videos", "v1", firstUID].join(":"));
+    state.uid = 67890;
+    state.videos[0].stat.view = 8;
+    const other = worker({ store: first.store, intercept, secret: "other-fixture-session" });
+    other.clock.now += 43200000;
+    await other.refresh();
+    expect(value(other, deltaKey("BVDeltaA", "views"))).toBe("—");
+    expect(other.store.get(["videos", "v1", firstUID].join(":"))).toBe(saved);
+    expect(other.store.has(["videos", "v1", state.uid].join(":"))).toBe(true);
+    state.uid = firstUID;
+    state.videos[0].stat.view = 20010;
+    const returned = worker({ store: first.store, intercept });
+    returned.clock.now += 64800000;
+    await returned.refresh();
+    expect(value(returned, deltaKey("BVDeltaA", "views"))).toBe("-2");
+  });
+
+  test("disabled fields have no delta or stored zero and first enabled samples start at an em dash", async () => {
+    const { state, intercept } = videoFeed();
+    for (const video of state.videos) video.stat = { view: video.stat.view };
+    const inputs = Object.fromEntries(VIDEO_STATS.slice(1).map(([, , , toggle]) => [toggle, false]));
+    const w = worker({ intercept, inputs });
+    await w.refresh();
+    const saved = w.store.get(["videos", "v1", state.uid].join(":"));
+    expect(saved).toBeDefined();
+    expect(value(w, deltaKey("BVDeltaA", "views"))).toBe("—");
+    for (const [field, , label] of VIDEO_STATS.slice(1)) {
+      expect(find(w.render(), deltaKey("BVDeltaA", field))).toBeUndefined();
+      expect(find(w.render(), counterKey("BVDeltaA", label))).toBeUndefined();
+      expect(saved).not.toContain('"' + field + '":0');
+    }
+    for (const video of state.videos) for (const [, api] of VIDEO_STATS.slice(1)) video.stat[api] = 7;
+    for (const [, , , toggle] of VIDEO_STATS.slice(1)) w.env.inputs[toggle] = true;
+    await w.refresh();
+    for (const [field, , label] of VIDEO_STATS.slice(1)) {
+      expect(value(w, counterKey("BVDeltaA", label))).toBe("7");
+      expect(value(w, deltaKey("BVDeltaA", field))).toBe("—");
+    }
+    state.videos[0].stat.like = 9;
+    await w.refresh();
+    expect(value(w, deltaKey("BVDeltaA", "likes"))).toBe("+2");
+  });
+
+  test("a missing enabled field fails without inventing zero or advancing any video baseline", async () => {
+    const { state, intercept } = videoFeed();
+    const w = worker({ intercept });
+    delete state.videos[0].stat.like;
+    await w.refresh();
+    expect(w.store.has(["videos", "v1", state.uid].join(":"))).toBe(false);
+    expect(find(w.render(), counterKey("BVDeltaA", "点赞"))).toBeUndefined();
+    expect(find(w.render(), deltaKey("BVDeltaA", "likes"))).toBeUndefined();
+    state.videos[0].stat.like = 10;
+    await w.refresh();
+    expect(value(w, deltaKey("BVDeltaA", "likes"))).toBe("—");
+    const key = ["videos", "v1", state.uid].join(":");
+    const saved = w.store.get(key);
+    delete state.videos[0].stat.like;
+    state.videos[0].stat.view += 100;
+    await w.refresh();
+    expect(w.store.get(key)).toBe(saved);
+    expect(value(w, counterKey("BVDeltaA", "点赞"))).toBe("10");
+    state.videos[0].stat.like = 12;
+    await w.refresh();
+    expect(value(w, deltaKey("BVDeltaA", "likes"))).toBe("+2");
+    expect(value(w, deltaKey("BVDeltaA", "views"))).toBe("+100");
+  });
+});
+
+describe("independent private-message refresh", () => {
+  test("manual refresh fetches private messages before lifecycle start and the default timer fires at ten minutes", async () => {
+    let unread = 5;
+    const w = worker({ intercept: url => url.pathname === PRIVATE ? privatePayload(unread) : undefined });
+    await w.refresh();
+    expect(value(w, "private-total")).toBe("5");
+    const beforeStart = w.requests.length;
+    await w.tick(600000);
+    expect(w.requests).toHaveLength(beforeStart);
+    await w.event("lifecycle", { type: "start" });
+    const beforeTimer = w.requests.length;
+    unread = 8;
+    await w.tick(599999);
+    expect(w.requests).toHaveLength(beforeTimer);
+    expect(value(w, "private-total")).toBe("5");
+    await w.tick(1);
+    expect(w.requests.slice(beforeTimer).map(({ url }) => url.pathname)).toEqual([PRIVATE]);
+    expect(value(w, "private-total")).toBe("8");
+    expect(value(w, "notice-likes")).toBe("8");
+    expect(value(w, "followers")).toBe("1,200");
+    unread = 9;
+    await w.tick(600000);
+    expect(w.requests.slice(beforeTimer).map(({ url }) => url.pathname)).toEqual([PRIVATE, PRIVATE]);
+    expect(value(w, "private-total")).toBe("9");
+  });
+
+  test("each private_refresh select value controls the private-only timer boundary", async () => {
+    for (const [setting, interval] of [["5m", 300000], ["10m", 600000], ["30m", 1800000], ["1h", 3600000], ["6h", 21600000]]) {
+      const w = worker({ inputs: { private_refresh: setting } });
+      await w.refresh();
+      await w.event("lifecycle", { type: "start" });
+      const before = w.requests.length;
+      await w.tick(interval - 1);
+      expect(w.requests).toHaveLength(before);
+      await w.tick(1);
+      expect(w.requests.slice(before).map(({ url }) => url.pathname)).toEqual([PRIVATE]);
+      await w.event("lifecycle", { type: "stop" });
+    }
+  });
+
+  test("changing the private refresh selection reschedules the next request", async () => {
+    const w = worker();
+    await w.refresh();
+    await w.event("lifecycle", { type: "start" });
+    await w.tick(100000);
+    w.env.inputs.private_refresh = "5m";
+    w.render();
+    const before = w.requests.length;
+    await w.tick(299999);
+    expect(w.requests).toHaveLength(before);
+    await w.tick(1);
+    expect(w.requests.slice(before).map(({ url }) => url.pathname)).toEqual([PRIVATE]);
+  });
+
+  test("private or message disable stops the timer and re-enabling resumes it", async () => {
+    for (const toggle of ["show_message_private", "show_messages"]) {
+      const w = worker();
+      await w.refresh();
+      await w.event("lifecycle", { type: "start" });
+      w.env.inputs[toggle] = false;
+      w.render();
+      const before = w.requests.length;
+      await w.tick(1200000);
+      expect(w.requests).toHaveLength(before);
+      expect(find(w.render(), "private-total")).toBeUndefined();
+      w.env.inputs[toggle] = true;
+      w.render();
+      await w.tick(599999);
+      expect(w.requests).toHaveLength(before);
+      await w.tick(1);
+      expect(w.requests.slice(before).map(({ url }) => url.pathname)).toEqual([PRIVATE]);
+    }
+  });
+
+  test("lifecycle stop cancels the timer and repeated starts do not duplicate it", async () => {
+    const w = worker();
+    await w.refresh();
+    await w.event("lifecycle", { type: "start" });
+    await w.event("lifecycle", { type: "start" });
+    const before = w.requests.length;
+    await w.tick(600000);
+    expect(w.requests.slice(before).map(({ url }) => url.pathname)).toEqual([PRIVATE]);
+    await w.event("lifecycle", { type: "stop" });
+    const stopped = w.requests.length;
+    await w.tick(1200000);
+    expect(w.requests).toHaveLength(stopped);
+    await w.event("lifecycle", { type: "start" });
+    await w.tick(600000);
+    expect(w.requests.slice(stopped).map(({ url }) => url.pathname)).toEqual([PRIVATE]);
+  });
+
+  test("a transient private failure preserves counts and the next timer request recovers", async () => {
+    let failure = false, unread = 5;
+    const w = worker({ intercept: url => url.pathname === PRIVATE
+      ? failure ? { code: -352, message: "private-session must not be displayed" } : privatePayload(unread) : undefined });
+    await w.refresh();
+    await w.event("lifecycle", { type: "start" });
+    const before = w.requests.length;
+    failure = true;
+    await w.tick(600000);
+    expect(value(w, "private-total")).toBe("5");
+    expect(w.render().tray.error).toContain("风控");
+    expect(w.render().tray.error).not.toContain("private-session");
+    expect(value(w, "notice-likes")).toBe("8");
+    failure = false;
+    unread = 12;
+    await w.tick(600000);
+    expect(value(w, "private-total")).toBe("12");
+    expect(w.render().tray.error).toBe("");
+    expect(w.requests.slice(before).map(({ url }) => url.pathname)).toEqual([PRIVATE, PRIVATE]);
+  });
+
+  test("manual refresh and the private timer share one in-flight private request in either order", async () => {
+    for (const first of ["manual", "timer"]) {
+      let held = false, release, entered;
+      const pending = new Promise(resolve => { release = resolve; });
+      const started = new Promise(resolve => { entered = resolve; });
+      const w = worker({ intercept: url => {
+        if (url.pathname === PRIVATE) {
+          if (held) { entered(); return pending; }
+          return privatePayload(5);
+        }
+      } });
+      await w.refresh();
+      await w.event("lifecycle", { type: "start" });
+      const before = w.requests.filter(({ url }) => url.pathname === PRIVATE).length;
+      held = true;
+      let manual;
+      if (first === "manual") {
+        manual = w.refresh();
+        await started;
+        await w.tick(600000);
+      } else {
+        await w.tick(600000);
+        await started;
+        manual = w.refresh();
+        await w.flush();
+      }
+      expect(w.requests.filter(({ url }) => url.pathname === PRIVATE)).toHaveLength(before + 1);
+      expect(value(w, "private-total")).toBe("5");
+      release(privatePayload(17));
+      await manual;
+      await w.flush();
+      expect(value(w, "private-total")).toBe("17");
+      expect(w.requests.filter(({ url }) => url.pathname === PRIVATE)).toHaveLength(before + 1);
+    }
+  });
+
+  test("disable and stop discard late timer success and failure outcomes", async () => {
+    for (const action of ["private-disable", "messages-disable", "stop"]) {
+      for (const outcome of [privatePayload(99), { code: -352 }]) {
+        let held = false, release, signal;
+        const pending = new Promise(resolve => { release = resolve; });
+        const w = worker({ intercept: (url, options) => {
+          if (url.pathname === PRIVATE) {
+            if (held) { signal = options.signal; return pending; }
+            return privatePayload(5);
+          }
+        } });
+        await w.refresh();
+        await w.event("lifecycle", { type: "start" });
+        held = true;
+        await w.tick(600000);
+        expect(signal).toBeDefined();
+        if (action === "stop") await w.event("lifecycle", { type: "stop" });
+        else {
+          w.env.inputs[action === "private-disable" ? "show_message_private" : "show_messages"] = false;
+          w.render();
+        }
+        expect(signal.aborted).toBe(true);
+        const before = w.requests.length;
+        release(outcome);
+        await w.flush();
+        if (action !== "stop") {
+          w.env.inputs[action === "private-disable" ? "show_message_private" : "show_messages"] = true;
+          w.render();
+        }
+        expect(value(w, "private-total")).not.toBe("99");
+        expect(w.render().tray.error).toBe("");
+        if (action === "stop") {
+          await w.tick(1200000);
+          expect(w.requests).toHaveLength(before);
+        }
+      }
+    }
+  });
+
+  test("credential changes cancel the old timer and suppress late outcomes after a new account refresh", async () => {
+    for (const outcome of [privatePayload(99), { code: -352 }]) {
+      let held = false, release, signal;
+      const pending = new Promise(resolve => { release = resolve; });
+      const w = worker({ intercept: (url, options) => {
+        const second = options.headers.Cookie === "SESSDATA=second-fixture-session";
+        if (url.pathname === NAV && second) return nav(67890);
+        if (url.pathname === FANS && second) return ok({ mid: 67890, follower: 3, following: 1 });
+        if (url.pathname === LIST && second) return ok({ arc_audits: [], page: { pn: 1, ps: 30, count: 0 } });
+        if (url.pathname === PRIVATE) {
+          if (second) return privatePayload(7);
+          if (held) { signal = options.signal; return pending; }
+          return privatePayload(5);
+        }
+      } });
+      await w.refresh();
+      await w.event("lifecycle", { type: "start" });
+      held = true;
+      await w.tick(600000);
+      expect(signal).toBeDefined();
+      w.state.secret = "";
+      w.render();
+      expect(signal.aborted).toBe(true);
+      const before = w.requests.length;
+      await w.tick(1200000);
+      expect(w.requests).toHaveLength(before);
+      w.state.secret = "second-fixture-session";
+      await w.refresh();
+      expect(value(w, "uid")).toBe("UID 67890");
+      expect(value(w, "private-total")).toBe("7");
+      release(outcome);
+      await w.flush();
+      expect(value(w, "private-total")).toBe("7");
+      expect(w.render().tray.error).toBe("");
     }
   });
 });
