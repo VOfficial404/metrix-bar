@@ -251,8 +251,10 @@ describe("Bilibili dashboard behavior", () => {
     const w = worker({ inputs: { show_identity: false, show_followers: false, show_level: false } });
     await w.refresh();
     expect(find(w.render(), "tab-account")).toBeUndefined();
-    expect(find(w.render(), "page-videos").props.ignoreInput).toBe(false);
+    expect(find(w.render(), "page-messages").props.ignoreInput).toBe(false);
     w.select(1);
+    expect(find(w.render(), "page-videos").props.ignoreInput).toBe(false);
+    w.select(0);
     expect(find(w.render(), "page-messages").props.ignoreInput).toBe(false);
     w.env.inputs.show_messages = false;
     await w.refresh();
@@ -262,7 +264,7 @@ describe("Bilibili dashboard behavior", () => {
     expect(value(w, "BV1FixtureNew-播放")).toBe("12.3万");
     w.env.inputs.show_messages = true;
     await w.refresh();
-    w.select(1);
+    w.select(0);
     expect(find(w.render(), "page-messages").props.ignoreInput).toBe(false);
   });
 
@@ -350,7 +352,7 @@ describe("Bilibili dashboard behavior", () => {
     const before = w.requests.length;
     await w.refresh();
     expect(find(w.render(), "page-messages")).toBeUndefined();
-    expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
+    expect(find(w.render(), "page-videos").props.ignoreInput).toBe(false);
     expect(w.requests.slice(before).some(({ url }) => url.hostname === "api.vc.bilibili.com")).toBe(false);
     w.env.inputs.show_message_system = true;
     await w.refresh();

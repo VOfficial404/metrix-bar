@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.7.0" category="social" icon="tv"
+     version="1.7.1" category="social" icon="tv"
      description="查看 B 站账户、视频统计变化和私信会话；整体每 6 小时刷新，私信默认每 10 分钟刷新。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -118,9 +118,9 @@ let credential = "", inputError = "", videoLimit = 5, initialized = false, gener
 let account = null, followers = null, videos = null, privateMessages = null, notifications = null;
 let privateDisplay = "summary", privateLimit = 5, privateCardSize = "normal", conversations = null;
 let times = {}, errors = {}, loading = false, inflight = null, inflightGeneration = -1, refreshController = null;
-let tab = "account";
+let tab = "messages";
 // --stage-* maps to native background/text/textMuted/border/surface/accent/accentText.
-const TABS = [{ id: "account", label: "账户" }, { id: "videos", label: "视频" }, { id: "messages", label: "消息" }];
+const TABS = [{ id: "messages", label: "消息" }, { id: "videos", label: "视频" }, { id: "account", label: "账户" }];
 const VIDEO_STATS = [
   { option: "video_views", label: "播放", field: "views", api: "view" },
   { option: "video_likes", label: "点赞", field: "likes", api: "like" },
@@ -388,7 +388,7 @@ function sync(env) {
   features = nextFeatures;
   tabs = TABS.filter(item => item.id === "account" ? features.identity || features.followers || features.level
     : item.id === "messages" ? messagesEnabled() : features[item.id]);
-  if (!tabs.length) tabs = [TABS[0]];
+  if (!tabs.length) tabs = [TABS.find(item => item.id === "account")];
   if (!tabs.some(item => item.id === tab)) tab = tabs[0].id;
   stopMotion();
   inputError = !next ? "扫码登录以连接自己的 B 站账户。"
