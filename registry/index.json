@@ -8,20 +8,20 @@
       "id": "bilibili-account",
       "name": "哔哩哔哩账户",
       "protocol_version": "0",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "category": "social",
       "placements": [
         "menubar"
       ],
       "open_mode": "flyout",
       "window_style": "standard",
-      "description": "查看 B 站账户、视频统计变化和未读消息；整体每 6 小时刷新，私信默认每 10 分钟刷新。",
+      "description": "查看 B 站账户、视频统计变化和私信会话；整体每 6 小时刷新，私信默认每 10 分钟刷新。",
       "icon": "tv",
       "license": "AGPL-3.0-only",
       "homepage": "https://github.com/VOfficial404/metrix-bar",
       "docs": "打开看板扫码登录，在设置中选择需要的功能。详细说明：https://github.com/VOfficial404/metrix-bar/tree/main/dashboards/bilibili#readme",
-      "sha256": "abf3d7654430bc8bfc611813cc8a28594c689f6df8b6339828c9a5a82256943b",
-      "file": "bilibili/bilibili-account.abf3d7654430bc8bfc611813cc8a28594c689f6df8b6339828c9a5a82256943b.bar"
+      "sha256": "cd9f497fcdb36aac2f3c3a3a380e855b1281a85c0d54572cfa792cb1181735d0",
+      "file": "bilibili/bilibili-account.cd9f497fcdb36aac2f3c3a3a380e855b1281a85c0d54572cfa792cb1181735d0.bar"
     }
   ]
 }

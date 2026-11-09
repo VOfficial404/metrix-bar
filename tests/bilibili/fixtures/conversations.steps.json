@@ -1,0 +1,38 @@
+[
+  { "action": "scheduled", "expect": [{ "target": { "key": "coins" }, "text": "172.4" }] },
+  {
+    "action": "invoke",
+    "target": { "key": "navigation" },
+    "handler": "onChange",
+    "args": ["messages"],
+    "expect": [
+      { "target": { "key": "page-messages" }, "props": { "ignoreInput": false } },
+      { "target": { "key": "private-total" }, "text": "5" },
+      { "target": { "key": "notice-reply" }, "text": "4" },
+      { "target": { "key": "notice-at" }, "text": "3" },
+      { "target": { "key": "private-conversations" } },
+      {"target":{"key":"private-session-21001"}},
+      {"target":{"key":"conversation-name-21001"},"text":"示例小林"},
+      {"target":{"key":"conversation-uid-21001"},"text":"UID 21001"},
+      {"target":{"key":"conversation-preview-21001"},"text":"周末一起拍视频吧！"},
+      {"target":{"key":"conversation-time-21001"}},
+      {"target":{"key":"conversation-unread-21001"},"text":"2"},
+      {"target":{"key":"private-session-21002"}},
+      {"target":{"key":"conversation-name-21002"},"text":"示例阿青"},
+      {"target":{"key":"conversation-uid-21002"},"text":"UID 21002"},
+      {"target":{"key":"conversation-preview-21002"},"text":"我：[图片]"},
+      {"target":{"key":"conversation-time-21002"}},
+      {"target":{"key":"conversation-unread-21002"},"absent":true},
+      {"target":{"key":"private-session-21003"}},
+      {"target":{"key":"conversation-name-21003"},"text":"示例小雨"},
+      {"target":{"key":"conversation-uid-21003"},"text":"UID 21003"},
+      {"target":{"key":"conversation-preview-21003"},"text":"[消息已撤回]"},
+      {"target":{"key":"conversation-time-21003"}},
+      {"target":{"key":"conversation-unread-21003"},"text":"1"},
+      {"target":{"key":"private-session-99001"},"absent":true},
+      {"target":{"key":"private-session-99002"},"absent":true},
+      { "target": { "key": "no-conversations" }, "absent": true },
+      { "target": { "key": "error-conversations" }, "absent": true }
+    ]
+  }
+]

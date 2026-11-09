@@ -13,6 +13,8 @@ const LIST = "/x/web/archives";
 const VIEW = "/x/web-interface/view";
 const ok = data => ({ code: 0, data });
 const PRIVATE = "/session_svr/v1/session_svr/single_unread";
+const SESSIONS = "/session_svr/v1/session_svr/get_sessions";
+const USER_CARDS = "/account/v1/user/cards";
 const VIDEO_STATS = [
   ["views", "view", "播放", "show_video_views"],
   ["likes", "like", "点赞", "show_video_likes"],
@@ -47,6 +49,8 @@ function videoFeed() {
 function worker({ store = new Map(), intercept = () => undefined, secret = "fixture-session", saveSecret, inputs = {} } = {}) {
   const routes = structuredClone(fixture.http).map(route => ({ ...route, used: 0 }));
   const requests = [];
+  const openedURLs = [];
+  const storageWrites = [];
   const clock = { now: Date.parse(fixture.now) };
   const timers = new Map();
   let timerID = 0;
@@ -64,8 +68,11 @@ function worker({ store = new Map(), intercept = () => undefined, secret = "fixt
   const context = createContext({
     Date: ClockDate, AbortSignal, AbortController, URL, URLSearchParams,
     setTimeout: setTimer, clearTimeout: id => timers.delete(id),
-    localStorage: { getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, String(value)) },
-    $metrix: { secret: () => state.secret, invalidate() {}, openURL() {},
+    localStorage: { getItem: key => store.get(key) ?? null, setItem: (key, value) => {
+      storageWrites.push({ key, value: String(value) });
+      store.set(key, String(value));
+    } },
+    $metrix: { secret: () => state.secret, invalidate() {}, openURL: url => openedURLs.push(url),
       async setSecret(name, value) {
         if (saveSecret) await saveSecret(name, value);
         state.saved.push({ name, value });
@@ -88,7 +95,7 @@ function worker({ store = new Map(), intercept = () => undefined, secret = "fixt
   runInContext(script.replace("export default", "globalThis.dashboard ="), context);
   const env = { inputs: { video_count: "3", ...inputs }, reason: "manual" };
   return {
-    store, state, env, clock, requests,
+    store, state, env, clock, requests, openedURLs, storageWrites,
     render: () => context.dashboard.render(env),
     refresh: () => context.dashboard.scheduled(env),
     click: key => find(context.dashboard.render(env), key).props.onClick(),
@@ -126,6 +133,43 @@ function nav(uid = 12345, extra = {}) {
 function detail(id, published, uid = 12345) {
   return ok({ bvid: id, title: id, pubdate: published, owner: { mid: uid },
     stat: { view: 0, like: 0, favorite: 0, coin: 0, reply: 0 } });
+}
+
+function conversation(uid, ts = 1800000000000000, extra = {}) {
+  return { talker_id: uid, session_type: 1, session_ts: ts, unread_count: 2,
+    system_msg_type: 0, is_intercept: 0,
+    last_msg: { sender_uid: uid, receiver_type: 1, receiver_id: 12345, msg_type: 1,
+      content: JSON.stringify({ content: "合成消息 " + uid }), timestamp: 1800000000, msg_status: 0 }, ...extra };
+}
+function conversationFeed(sessions = [conversation(70001)]) {
+  const state = { uid: 12345, sessions, unread: 5, failure: null, cards: null, getSessions: null };
+  const intercept = url => {
+    if (url.pathname === NAV) return nav(state.uid);
+    if (url.pathname === FANS) return ok({ mid: state.uid, follower: 1200, following: 88 });
+    if (url.pathname === LIST && state.uid !== 12345) return ok({ arc_audits: [], page: { pn: 1, ps: 30, count: 0 } });
+    if (url.pathname === PRIVATE) return state.failure === "private" ? { code: -352 } : privatePayload(state.unread);
+    if (url.pathname === SESSIONS) return state.getSessions ? state.getSessions(url)
+      : state.failure === "sessions" ? { code: -352, message: "synthetic-remote-private-error" }
+      : ok({ session_list: state.sessions, has_more: 0 });
+    if (url.pathname === USER_CARDS) return state.failure === "cards" ? { code: -352 }
+      : ok(state.cards ?? url.searchParams.get("uids").split(",").reverse().map(uid =>
+        ({ mid: Number(uid), name: "合成用户 " + uid, face: "http://i1.hdslb.com/bfs/face/synthetic-" + uid + ".jpg" })));
+  };
+  return { state, intercept };
+}
+const conversationIDs = w => nodes(w.render()).map(node => node.props?.key || node.key)
+  .filter(key => typeof key === "string" && key.startsWith("private-session-"));
+function errorSectionText(w, key) {
+  const section = nodes(w.render()).find(node => node.children?.some(child => child?.props?.key === "error-" + key));
+  return section?.children.map(child => child?.props?.text || "").join("\n");
+}
+function privateSample(w) {
+  return nodes(w.render()).flatMap(node => typeof node.props?.tooltip === "string" ? node.props.tooltip.split(" · ") : [])
+    .find(part => part.startsWith("私信 "));
+}
+function conversationSample(w) {
+  return nodes({ panel: find(w.render(), "private-conversations") })
+    .find(node => node.props?.tooltip?.startsWith("会话更新："))?.props.tooltip;
 }
 
 describe("Bilibili dashboard behavior", () => {
@@ -1022,5 +1066,480 @@ describe("independent private-message refresh", () => {
       expect(value(w, "private-total")).toBe("7");
       expect(w.render().tray.error).toBe("");
     }
+  });
+});
+
+describe("optional private conversation cards", () => {
+  test("summary is the default and never requests sessions or identity cards", async () => {
+    for (const inputs of [{}, { private_display: "summary" }]) {
+      const feed = conversationFeed();
+      const w = worker({ inputs, intercept: feed.intercept });
+      await w.refresh();
+      expect(value(w, "private-total")).toBe("5");
+      expect(value(w, "notice-likes")).toBe("8");
+      expect(find(w.render(), "private-conversations")).toBeUndefined();
+      expect(w.requests.some(({ url }) => [SESSIONS, USER_CARDS].includes(url.pathname))).toBe(false);
+    }
+  });
+
+  test("conversation requests require both messages and private messages to be enabled", async () => {
+    for (const toggle of ["show_messages", "show_message_private"]) {
+      const feed = conversationFeed();
+      const w = worker({ inputs: { private_display: "list", [toggle]: false }, intercept: feed.intercept });
+      await w.refresh();
+      expect(find(w.render(), "private-conversations")).toBeUndefined();
+      expect(w.requests.some(({ url }) => [PRIVATE, SESSIONS, USER_CARDS].includes(url.pathname))).toBe(false);
+    }
+  });
+
+  test("list mode retains unread totals and notifications and honors every conversation count", async () => {
+    for (const [setting, expected] of [[undefined, 5], ["3", 3], ["5", 5], ["10", 10]]) {
+      const feed = conversationFeed(Array.from({ length: 12 }, (_, i) => conversation(70001 + i, 1800000000000000 - i)));
+      const w = worker({ inputs: { private_display: "list", ...(setting ? { private_count: setting } : {}) }, intercept: feed.intercept });
+      await w.refresh();
+      expect(conversationIDs(w)).toHaveLength(expected);
+      expect(value(w, "private-total")).toBe("5");
+      expect(value(w, "notice-likes")).toBe("8");
+      expect(value(w, "notice-reply")).toBeDefined();
+      expect(find(w.render(), "private-conversations")).toBeDefined();
+      const cards = w.requests.find(({ url }) => url.pathname === USER_CARDS).url;
+      expect(cards.searchParams.get("uids").split(",")).toHaveLength(expected);
+    }
+  });
+
+  test("identity cards match MID despite reordered responses and use the fixed conversation link", async () => {
+    const feed = conversationFeed([conversation(70001, 1800000000000002), conversation(70002, 1800000000000001)]);
+    const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+    await w.refresh();
+    for (const uid of [70001, 70002]) {
+      expect(value(w, "conversation-name-" + uid)).toBe("合成用户 " + uid);
+      expect(value(w, "conversation-uid-" + uid)).toBe("UID " + uid);
+      expect(value(w, "conversation-unread-" + uid)).toContain("2");
+      expect(value(w, "conversation-time-" + uid)).toMatch(/\d{2}:\d{2}/);
+      const card = find(w.render(), "private-session-" + uid);
+      const avatar = nodes({ panel: card }).find(node => node.props?.src);
+      expect(avatar.props.src).toBe("https://i1.hdslb.com/bfs/face/synthetic-" + uid + ".jpg");
+      await w.click("private-session-" + uid);
+    }
+    expect(w.openedURLs).toEqual(["https://message.bilibili.com/#/whisper/mid70001", "https://message.bilibili.com/#/whisper/mid70002"]);
+    const request = w.requests.find(({ url }) => url.pathname === USER_CARDS);
+    expect(request.url.hostname).toBe("api.vc.bilibili.com");
+    expect(request.url.search).toContain("uids=70001%2C70002");
+    expect(request.options.headers.Cookie).toBe("SESSDATA=fixture-session");
+  });
+
+  test("missing identities fall back to the actual UID and untrusted avatar URLs stay out of the view", async () => {
+    const feed = conversationFeed([conversation(70001), conversation(70002, 1799999999999999)]);
+    feed.state.cards = [{ mid: 70002, name: "合成第二用户", face: "https://untrusted.invalid/synthetic-face.jpg" },
+      { mid: 99999, name: "不相关的合成身份", face: "https://i0.hdslb.com/bfs/face/unrelated.jpg" }];
+    const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+    await w.refresh();
+    expect(value(w, "conversation-name-70001")).toContain("70001");
+    expect(value(w, "conversation-uid-70001")).toBe("UID 70001");
+    expect(value(w, "conversation-name-70002")).toBe("合成第二用户");
+    expect(JSON.stringify(w.render())).not.toContain("untrusted.invalid");
+    expect(JSON.stringify(w.render())).not.toContain("不相关的合成身份");
+    expect(find(w.render(), "error-conversations")).toBeUndefined();
+  });
+
+  test("session ordering filters groups, system, intercepted and self sessions and deduplicates talkers", async () => {
+    const feed = conversationFeed([
+      conversation(70003, 1800000000000003), conversation(70001, 1800000000000001),
+      conversation(70002, 1800000000000002), conversation(70002, 1800000000000004),
+      conversation(71001, 1800000000000010, { session_type: 2 }),
+      conversation(0, 1800000000000009, { system_msg_type: 1 }),
+      conversation(71003, 1800000000000008, { is_intercept: 1 }), conversation(12345, 1800000000000007),
+    ]);
+    const w = worker({ inputs: { private_display: "list", private_count: "3" }, intercept: feed.intercept });
+    await w.refresh();
+    expect(conversationIDs(w)).toEqual(["private-session-70002", "private-session-70003", "private-session-70001"]);
+    expect(w.requests.find(({ url }) => url.pathname === USER_CARDS).url.searchParams.get("uids")).toBe("70002,70003,70001");
+  });
+
+  test("pagination uses the minimum microsecond cursor and continues until enough distinct eligible talkers", async () => {
+    const feed = conversationFeed();
+    feed.state.getSessions = url => url.searchParams.has("end_ts")
+      ? ok({ session_list: [conversation(70001, 1800000000000015), conversation(70002, 1800000000000014),
+        conversation(70003, 1800000000000013)], has_more: 1 })
+      : ok({ session_list: [conversation(70001, 1800000000000020),
+        conversation(71001, 1800000000000016, { session_type: 2 }), conversation(70001, 1800000000000018)], has_more: 1 });
+    const w = worker({ inputs: { private_display: "list", private_count: "3" }, intercept: feed.intercept });
+    await w.refresh();
+    expect(conversationIDs(w)).toEqual(["private-session-70001", "private-session-70002", "private-session-70003"]);
+    const requests = w.requests.filter(({ url }) => url.pathname === SESSIONS);
+    expect(requests).toHaveLength(2);
+    expect(requests[0].url.origin).toBe("https://api.vc.bilibili.com");
+    expect(Object.fromEntries(requests[0].url.searchParams)).toEqual({ session_type: "1", group_fold: "1", unfollow_fold: "0",
+      sort_rule: "2", size: "20", build: "0", mobi_app: "web" });
+    expect(requests[1].url.searchParams.get("end_ts")).toBe("1800000000000016");
+    expect(requests[0].options.signal).toBe(requests[1].options.signal);
+  });
+
+  test("pagination rejects repeated or increasing cursors instead of looping or publishing a partial list", async () => {
+    for (const [next, hasMore, fill] of [[1800000000000010, 1, false], [1800000000000011, 1, false],
+      [1800000000000010, 0, false], [1800000000000011, 0, false],
+      [1800000000000010, 1, true], [1800000000000011, 0, true]]) {
+      const feed = conversationFeed();
+      feed.state.getSessions = url => url.searchParams.has("end_ts")
+        ? ok({ session_list: [conversation(70002, next), ...(fill ? [conversation(70003, next)] : [])], has_more: hasMore })
+        : ok({ session_list: [conversation(70001, 1800000000000010)], has_more: 1 });
+      const w = worker({ inputs: { private_display: "list", private_count: "3" }, intercept: feed.intercept });
+      await w.refresh();
+      expect(w.requests.filter(({ url }) => url.pathname === SESSIONS)).toHaveLength(2);
+      expect(w.requests.some(({ url }) => url.pathname === USER_CARDS)).toBe(false);
+      expect(find(w.render(), "error-conversations")).toBeDefined();
+      expect(conversationIDs(w)).toEqual([]);
+      expect(value(w, "private-total")).toBe("5");
+    }
+  });
+
+  test("exhausted null, empty and entirely filtered sessions are successful empty lists", async () => {
+    for (const sessions of [null, [], [conversation(71001, 1800000000000000, { session_type: 2 })]]) {
+      const feed = conversationFeed(sessions);
+      const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+      await w.refresh();
+      expect(find(w.render(), "no-conversations")).toBeDefined();
+      expect(find(w.render(), "error-conversations")).toBeUndefined();
+      expect(conversationIDs(w)).toEqual([]);
+      expect(w.requests.some(({ url }) => url.pathname === USER_CARDS)).toBe(false);
+    }
+  });
+
+  test("invalid session envelopes and unsafe session fields are errors rather than successful empty data", async () => {
+    const payloads = [{}, { session_list: {}, has_more: 0 }, { session_list: [], has_more: 2 },
+      { session_list: [], has_more: 1 }, { session_list: null, has_more: 1 },
+      { session_list: [conversation(70001)], has_more: undefined },
+      { session_list: [conversation(70001, Number.MAX_SAFE_INTEGER + 1)], has_more: 0 },
+      { session_list: [conversation(70001, 1800000000000000, { unread_count: -1 })], has_more: 0 }];
+    for (const payload of payloads) {
+      const feed = conversationFeed();
+      feed.state.getSessions = () => ok(payload);
+      const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+      await w.refresh();
+      expect(find(w.render(), "error-conversations")).toBeDefined();
+      expect(find(w.render(), "no-conversations")).toBeUndefined();
+      expect(value(w, "private-total")).toBe("5");
+    }
+  });
+
+  test("malformed identity responses fail independently instead of manufacturing usable profiles", async () => {
+    for (const cards of [{}, [null], [{ mid: "70001", name: "合成错型身份" }], [{ mid: 70001, name: 99 }]]) {
+      const feed = conversationFeed();
+      feed.state.cards = cards;
+      const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+      await w.refresh();
+      expect(find(w.render(), "error-conversations")).toBeDefined();
+      expect(conversationIDs(w)).toEqual([]);
+      expect(value(w, "private-total")).toBe("5");
+      expect(find(w.render(), "error-private")).toBeUndefined();
+    }
+  });
+
+  test("text, outgoing, image, emoji, absent and unsupported message previews are safe and descriptive", async () => {
+    const variants = [
+      [{ content: JSON.stringify({ content: "合成入站文本" }) }, "合成入站文本"],
+      [{ sender_uid: 12345, receiver_id: 70001, content: JSON.stringify({ content: "合成出站文本" }) }, "我：合成出站文本"],
+      [{ msg_type: 2, content: JSON.stringify({ url: "https://untrusted.invalid/image-payload" }) }, "[图片]"],
+      [{ sender_uid: 12345, receiver_id: 70001, msg_type: 2, content: JSON.stringify({ url: "https://untrusted.invalid/image-payload" }) }, "我：[图片]"],
+      [{ msg_type: 6, content: JSON.stringify({ content: "synthetic-emoji-payload" }) }, "[表情]"],
+    ];
+    for (const [changes, expected] of variants) {
+      const session = conversation(70001);
+      Object.assign(session.last_msg, changes);
+      const feed = conversationFeed([session]);
+      const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+      await w.refresh();
+      expect(value(w, "conversation-preview-70001")).toBe(expected);
+      expect(JSON.stringify(w.render())).not.toContain("untrusted.invalid");
+      expect(JSON.stringify(w.render())).not.toContain("synthetic-emoji-payload");
+    }
+    const empty = conversationFeed([conversation(70001, 1800000000000000, { last_msg: null })]);
+    const w = worker({ inputs: { private_display: "list" }, intercept: empty.intercept });
+    await w.refresh();
+    expect(value(w, "conversation-preview-70001")).toBe("暂无消息内容");
+    empty.state.sessions[0].last_msg = { ...conversation(70001).last_msg, msg_type: 999,
+      content: JSON.stringify({ content: "synthetic-unsupported-raw-content" }) };
+    await w.refresh();
+    expect(value(w, "conversation-preview-70001")).toMatch(/消息|类型|不支持/);
+    expect(JSON.stringify(w.render())).not.toContain("synthetic-unsupported-raw-content");
+  });
+
+  test("recall types, status flags and cancellation payloads never expose recalled text", async () => {
+    for (const changes of [{ msg_type: 5 }, { msg_status: 1 }, { msg_status: 2 },
+      { sys_cancel: true }]) {
+      const session = conversation(70001);
+      Object.assign(session.last_msg, { content: JSON.stringify({ content: "synthetic-recalled-private-text" }) }, changes);
+      const feed = conversationFeed([session]);
+      const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+      await w.refresh();
+      expect(value(w, "conversation-preview-70001")).toBe("[消息已撤回]");
+      expect(JSON.stringify(w.render())).not.toContain("synthetic-recalled-private-text");
+    }
+  });
+
+  test("malformed text previews explicitly report unavailable content without exposing raw JSON", async () => {
+    for (const content of ["{synthetic-malformed-private-json", JSON.stringify({ other: "synthetic-malformed-private-json" }),
+      JSON.stringify({ content: 42 })]) {
+      const session = conversation(70001);
+      session.last_msg.content = content;
+      const feed = conversationFeed([session]);
+      const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+      await w.refresh();
+      expect(value(w, "conversation-preview-70001")).toMatch(/无法|不可用|暂不可|格式|解析/);
+      expect(JSON.stringify(w.render())).not.toContain("synthetic-malformed-private-json");
+    }
+  });
+
+  test("last messages must belong to the current account and the selected talker", async () => {
+    for (const changes of [{ sender_uid: 99999 }, { receiver_id: 99999 }, { receiver_type: 2 },
+      { sender_uid: 12345, receiver_id: 12345 }, { sender_uid: 70002, receiver_id: 70001 }]) {
+      const session = conversation(70001);
+      Object.assign(session.last_msg, { content: JSON.stringify({ content: "synthetic-unrelated-message" }) }, changes);
+      const feed = conversationFeed([session]);
+      const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+      await w.refresh();
+      expect(JSON.stringify(w.render())).not.toContain("synthetic-unrelated-message");
+      expect(value(w, "conversation-preview-70001") || value(w, "error-conversations")).toMatch(/无法|不可用|暂不可|结构|格式|解析/);
+    }
+  });
+
+  test("conversation and unread errors retain their own last successes and recover independently", async () => {
+    const feed = conversationFeed();
+    const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+    await w.refresh();
+    const preview = value(w, "conversation-preview-70001");
+    const messageTime = value(w, "conversation-time-70001");
+    const initialPrivate = privateSample(w);
+    const initialConversation = conversationSample(w);
+    expect(initialPrivate).toBeDefined();
+    expect(initialConversation).toBeDefined();
+    w.clock.now += 60000;
+    feed.state.failure = "sessions";
+    feed.state.unread = 9;
+    await w.refresh();
+    expect(value(w, "private-total")).toBe("9");
+    expect(privateSample(w)).not.toBe(initialPrivate);
+    expect(conversationSample(w)).toBe(initialConversation);
+    expect(value(w, "conversation-preview-70001")).toBe(preview);
+    expect(value(w, "conversation-time-70001")).toBe(messageTime);
+    expect(find(w.render(), "error-private")).toBeUndefined();
+    expect(errorSectionText(w, "conversations")).toContain("上次成功");
+    const lastConversationError = errorSectionText(w, "conversations");
+    w.clock.now += 60000;
+    await w.refresh();
+    expect(errorSectionText(w, "conversations")).toBe(lastConversationError);
+    expect(JSON.stringify(w.render())).not.toContain("synthetic-remote-private-error");
+    const lastPrivate = privateSample(w);
+    feed.state.failure = "private";
+    feed.state.sessions[0].last_msg.content = JSON.stringify({ content: "合成恢复后的会话" });
+    w.clock.now += 60000;
+    await w.refresh();
+    expect(value(w, "private-total")).toBe("9");
+    expect(privateSample(w)).toBe(lastPrivate);
+    expect(conversationSample(w)).not.toBe(initialConversation);
+    expect(find(w.render(), "error-private")).toBeDefined();
+    expect(find(w.render(), "error-conversations")).toBeUndefined();
+    expect(value(w, "conversation-preview-70001")).toBe("合成恢复后的会话");
+    feed.state.failure = null;
+    await w.refresh();
+    expect(w.render().tray.error).toBe("");
+  });
+
+  test("identity request failures preserve prior cards while unread totals continue updating", async () => {
+    const feed = conversationFeed();
+    const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+    await w.refresh();
+    feed.state.failure = "cards";
+    feed.state.unread = 13;
+    feed.state.sessions = [conversation(70002)];
+    await w.refresh();
+    expect(value(w, "private-total")).toBe("13");
+    expect(conversationIDs(w)).toEqual(["private-session-70001"]);
+    expect(value(w, "conversation-name-70001")).toBe("合成用户 70001");
+    expect(find(w.render(), "error-conversations")).toBeDefined();
+    expect(find(w.render(), "error-private")).toBeUndefined();
+  });
+
+  test("the list timer refreshes unread, sessions and cards without notifications or other metrics", async () => {
+    const feed = conversationFeed();
+    const w = worker({ inputs: { private_display: "list" }, intercept: feed.intercept });
+    await w.refresh();
+    await w.event("lifecycle", { type: "start" });
+    const before = w.requests.length;
+    feed.state.unread = 11;
+    feed.state.sessions[0].last_msg.content = JSON.stringify({ content: "合成定时更新" });
+    await w.tick(599999);
+    expect(w.requests).toHaveLength(before);
+    await w.tick(1);
+    const requests = w.requests.slice(before);
+    expect(requests.map(({ url }) => url.pathname).sort()).toEqual([PRIVATE, SESSIONS, USER_CARDS].sort());
+    expect(new Set(requests.map(({ options }) => options.signal)).size).toBe(1);
+    expect(value(w, "private-total")).toBe("11");
+    expect(value(w, "conversation-preview-70001")).toBe("合成定时更新");
+    expect(value(w, "notice-likes")).toBe("8");
+    expect(value(w, "followers")).toBe("1,200");
+  });
+
+  test("manual and timer refreshes share the entire session and identity request job in either order", async () => {
+    for (const phase of [SESSIONS, USER_CARDS]) {
+      for (const first of ["manual", "timer"]) {
+        const feed = conversationFeed();
+        let hold = false, release, entered;
+        const pending = new Promise(resolve => { release = resolve; });
+        const started = new Promise(resolve => { entered = resolve; });
+        const w = worker({ inputs: { private_display: "list" }, intercept: (url, options) => {
+          if (hold && url.pathname === phase) { entered(); return pending; }
+          return feed.intercept(url, options);
+        } });
+        await w.refresh();
+        await w.event("lifecycle", { type: "start" });
+        await w.tick(599999);
+        const before = w.requests.length;
+        hold = true;
+        let manual;
+        if (first === "manual") {
+          manual = w.refresh();
+          await started;
+          await w.tick(1);
+        } else {
+          await w.tick(1);
+          await started;
+          manual = w.refresh();
+          await w.flush();
+        }
+        for (const path of [PRIVATE, SESSIONS, USER_CARDS]) {
+          expect(w.requests.slice(before).filter(({ url }) => url.pathname === path).length).toBeLessThanOrEqual(1);
+        }
+        release(phase === SESSIONS ? ok({ session_list: [conversation(70002)], has_more: 0 })
+          : ok([{ mid: 70001, name: "合成合并请求用户", face: "" }]));
+        await manual;
+        await w.flush();
+        for (const path of [PRIVATE, SESSIONS, USER_CARDS]) {
+          expect(w.requests.slice(before).filter(({ url }) => url.pathname === path)).toHaveLength(1);
+        }
+        expect(value(w, phase === SESSIONS ? "conversation-name-70002" : "conversation-name-70001"))
+          .toBe(phase === SESSIONS ? "合成用户 70002" : "合成合并请求用户");
+      }
+    }
+  });
+
+  test("disable, summary and stop abort session or identity work and ignore late success and failure", async () => {
+    for (const action of ["show_message_private", "show_messages", "summary", "stop"]) {
+      for (const phase of [SESSIONS, USER_CARDS]) {
+        for (const failure of [false, true]) {
+          const feed = conversationFeed();
+          let hold = false, release, signal;
+          const pending = new Promise(resolve => { release = resolve; });
+          const w = worker({ inputs: { private_display: "list" }, intercept: (url, options) => {
+            if (hold && url.pathname === phase) { signal = options.signal; return pending; }
+            return feed.intercept(url, options);
+          } });
+          await w.refresh();
+          await w.event("lifecycle", { type: "start" });
+          hold = true;
+          await w.tick(600000);
+          expect(signal).toBeDefined();
+          if (action === "stop") await w.event("lifecycle", { type: "stop" });
+          else {
+            if (action === "summary") w.env.inputs.private_display = "summary";
+            else w.env.inputs[action] = false;
+            w.render();
+          }
+          expect(signal.aborted).toBe(true);
+          const before = w.requests.length;
+          release(failure ? { code: -352, message: "synthetic-late-private-error" }
+            : phase === SESSIONS ? ok({ session_list: [conversation(70009)], has_more: 0 })
+            : ok([{ mid: 70001, name: "synthetic-late-private-name", face: "" }]));
+          await w.flush();
+          expect(JSON.stringify(w.render())).not.toContain("synthetic-late-private");
+          expect(find(w.render(), "private-session-70009")).toBeUndefined();
+          expect(find(w.render(), "error-conversations")).toBeUndefined();
+          if (action === "stop") {
+            await w.tick(1200000);
+            expect(w.requests).toHaveLength(before);
+          } else {
+            if (action === "summary") w.env.inputs.private_display = "list";
+            else w.env.inputs[action] = true;
+            w.render();
+            expect(conversationIDs(w)).toEqual([]);
+          }
+        }
+      }
+    }
+  });
+
+  test("count and refresh configuration changes abort stale conversation jobs", async () => {
+    for (const [setting, next] of [["private_count", "3"], ["private_refresh", "5m"]]) {
+      const feed = conversationFeed();
+      let hold = false, release, signal;
+      const pending = new Promise(resolve => { release = resolve; });
+      const w = worker({ inputs: { private_display: "list" }, intercept: (url, options) => {
+        if (hold && url.pathname === SESSIONS) { signal = options.signal; return pending; }
+        return feed.intercept(url, options);
+      } });
+      await w.refresh();
+      await w.event("lifecycle", { type: "start" });
+      hold = true;
+      await w.tick(600000);
+      w.env.inputs[setting] = next;
+      w.render();
+      expect(signal.aborted).toBe(true);
+      release(ok({ session_list: [conversation(70009)], has_more: 0 }));
+      await w.flush();
+      expect(find(w.render(), "private-session-70009")).toBeUndefined();
+      expect(find(w.render(), "error-conversations")).toBeUndefined();
+    }
+  });
+
+  test("account changes clear conversation memory and suppress old session and identity responses", async () => {
+    for (const phase of [SESSIONS, USER_CARDS]) {
+      for (const failure of [false, true]) {
+        const feed = conversationFeed();
+        let hold = false, release, signal;
+        const pending = new Promise(resolve => { release = resolve; });
+        const w = worker({ inputs: { private_display: "list" }, intercept: (url, options) => {
+          if (hold && feed.state.uid === 12345 && url.pathname === phase) { signal = options.signal; return pending; }
+          return feed.intercept(url, options);
+        } });
+        await w.refresh();
+        await w.event("lifecycle", { type: "start" });
+        hold = true;
+        await w.tick(600000);
+        feed.state.uid = 67890;
+        feed.state.sessions = [conversation(70002)];
+        feed.state.sessions[0].last_msg.receiver_id = 67890;
+        w.state.secret = "second-synthetic-session";
+        expect(conversationIDs(w)).toEqual([]);
+        expect(signal.aborted).toBe(true);
+        await w.refresh();
+        expect(value(w, "uid")).toBe("UID 67890");
+        expect(conversationIDs(w)).toEqual(["private-session-70002"]);
+        release(failure ? { code: -352 } : phase === SESSIONS
+          ? ok({ session_list: [conversation(70009)], has_more: 0 })
+          : ok([{ mid: 70001, name: "synthetic-old-account-name", face: "" }]));
+        await w.flush();
+        expect(conversationIDs(w)).toEqual(["private-session-70002"]);
+        expect(JSON.stringify(w.render())).not.toContain("synthetic-old-account-name");
+        expect(find(w.render(), "error-conversations")).toBeUndefined();
+      }
+    }
+  });
+
+  test("conversation content and identities are never persisted or restored after worker restart", async () => {
+    const feed = conversationFeed();
+    const store = new Map();
+    const inputs = { private_display: "list" };
+    const w = worker({ store, inputs, intercept: feed.intercept });
+    await w.refresh();
+    expect(value(w, "conversation-preview-70001")).toBe("合成消息 70001");
+    const saved = JSON.stringify({ current: [...store], writes: w.storageWrites });
+    for (const marker of ["合成消息", "合成用户", "synthetic-70001.jpg", "70001", "fixture-session"]) expect(saved).not.toContain(marker);
+    expect(w.state.saved).toEqual([]);
+    const restarted = worker({ store, inputs, intercept: feed.intercept });
+    expect(conversationIDs(restarted)).toEqual([]);
+    expect(JSON.stringify(restarted.render())).not.toContain("合成消息");
+    expect(JSON.stringify(restarted.render())).not.toContain("合成用户");
+    const privateRequests = w.requests.filter(({ url }) => url.hostname === "api.vc.bilibili.com");
+    expect(privateRequests.every(({ options }) => !options.method || options.method === "GET")).toBe(true);
   });
 });
