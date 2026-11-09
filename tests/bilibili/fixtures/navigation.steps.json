@@ -1,0 +1,7 @@
+[
+  { "action": "scheduled", "expect": [{ "target": { "key": "follower-delta" }, "text": "首次建立基线" }] },
+  { "action": "scheduled", "expect": [{ "target": { "key": "follower-delta" }, "text": "+12" }] },
+  { "action": "invoke", "target": { "key": "navigation" }, "handler": "onChange", "args": ["videos"], "expect": [{ "target": { "key": "BV1FixtureNew-播放" }, "text": "12.3万" }] },
+  { "action": "invoke", "target": { "key": "navigation" }, "handler": "onChange", "args": ["messages"], "expect": [{ "target": { "key": "private-total" }, "text": "5" }, { "target": { "key": "notice-reply" }, "text": "4" }, { "target": { "key": "notice-at" }, "text": "3" }] },
+  { "action": "invoke", "target": { "key": "navigation" }, "handler": "onChange", "args": ["account"], "expect": [{ "target": { "key": "coins" }, "text": "172.4" }, { "target": { "key": "uid" }, "text": "UID 12345" }] }
+]

@@ -1,0 +1,14 @@
+{
+  "now": "2026-11-09T12:00:00Z",
+  "secrets": { "sessdata": "" },
+  "http": [
+    {
+      "url": "https://passport.bilibili.com/x/passport-login/web/qrcode/generate",
+      "body": "{\"code\":0,\"data\":{\"qrcode_key\":\"0123456789abcdef0123456789abcdef\",\"url\":\"https://account.bilibili.com/h5-app/passport/login/scan?navhide=1&qrcode_key=0123456789abcdef0123456789abcdef&from=\"}}"
+    },
+    {
+      "url": "https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=0123456789abcdef0123456789abcdef",
+      "body": "{\"code\":0,\"data\":{\"code\":86101,\"url\":\"\"}}"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://metrix.bar/dashboards/schema.json",
+  "schema_version": 1,
+  "id": "vofficial404",
+  "name": "VOfficial404",
+  "dashboards": [
+    {
+      "id": "bilibili-account",
+      "name": "哔哩哔哩账户",
+      "protocol_version": "0",
+      "version": "1.4.0",
+      "category": "social",
+      "placements": [
+        "menubar"
+      ],
+      "open_mode": "flyout",
+      "window_style": "standard",
+      "description": "按需查看 B 站账户、粉丝、视频和未读消息，每 6 小时刷新。",
+      "icon": "tv",
+      "license": "AGPL-3.0-only",
+      "homepage": "https://github.com/VOfficial404/metrix-bar",
+      "docs": "打开看板扫码登录，在设置中选择需要的功能。详细说明：https://github.com/VOfficial404/metrix-bar/tree/main/dashboards/bilibili#readme",
+      "sha256": "63e3bad11f7bbafff912983d011324dc61eecd24abb35cfaa58ba7b0dc56d4b3",
+      "file": "bilibili/bilibili-account.63e3bad11f7bbafff912983d011324dc61eecd24abb35cfaa58ba7b0dc56d4b3.bar"
+    }
+  ]
+}

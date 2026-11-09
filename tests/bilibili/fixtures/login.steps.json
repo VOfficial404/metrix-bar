@@ -1,0 +1,14 @@
+[
+  {
+    "action": "invoke",
+    "target": { "key": "login-start" },
+    "handler": "onClick",
+    "expect": [{ "target": { "key": "login-qr" } }]
+  },
+  {
+    "action": "invoke",
+    "target": { "key": "login-cancel" },
+    "handler": "onClick",
+    "expect": [{ "target": { "key": "login-qr" }, "absent": true }]
+  }
+]
