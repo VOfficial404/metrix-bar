@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.4.0" category="social" icon="tv"
+     version="1.4.1" category="social" icon="tv"
      description="按需查看 B 站账户、粉丝、视频和未读消息，每 6 小时刷新。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -13,14 +13,11 @@
     <network origin="https://i2.hdslb.com" />
   </permissions>
   <inputs>
-    <input name="sessdata" type="secret" label="Bilibili SESSDATA"
-           help="可选，也可打开看板扫码登录。" />
-    <input name="show_identity" type="bool" label="显示 UID 与硬币" default="true" />
-    <input name="show_followers" type="bool" label="显示粉丝与关注" default="true" />
-    <input name="show_level" type="bool" label="显示等级与经验" default="true" />
-    <input name="show_videos" type="bool" label="显示最近视频" default="true" />
-    <input name="show_messages" type="bool" label="显示未读消息" default="true" />
-    <input name="video_count" type="select" label="最近投稿数量" default="5">
+    <input name="show_identity" type="bool" label="账户 · UID 与硬币" default="true" />
+    <input name="show_followers" type="bool" label="账户 · 粉丝与关注" default="true" />
+    <input name="show_level" type="bool" label="账户 · 等级与经验" default="true" />
+    <input name="show_videos" type="bool" label="视频 · 启用视频页" default="true" />
+    <input name="video_count" type="select" label="视频 · 最近投稿数量" default="5">
       <option value="3" label="3 条" />
       <option value="5" label="5 条" />
       <option value="10" label="10 条" />
@@ -32,12 +29,15 @@
     <input name="show_video_favorites" type="bool" label="视频 · 收藏数" default="true" />
     <input name="show_video_coins" type="bool" label="视频 · 投币数" default="true" />
     <input name="show_video_comments" type="bool" label="视频 · 评论数" default="true" />
+    <input name="show_messages" type="bool" label="消息 · 启用消息页" default="true" />
     <input name="show_message_private" type="bool" label="消息 · 未读私信" default="true" />
     <input name="show_message_likes" type="bool" label="消息 · 收到的赞" default="true" />
     <input name="show_message_replies" type="bool" label="消息 · 回复我的" default="true" />
     <input name="show_message_mentions" type="bool" label="消息 · @ 我的" default="true" />
     <input name="show_message_system" type="bool" label="消息 · 系统通知" default="true" />
     <input name="show_message_assistant" type="bool" label="消息 · UP 主助手" default="true" />
+    <input name="sessdata" type="secret" label="高级 · SESSDATA（可选）"
+           help="默认使用看板内扫码登录。" />
   </inputs>
   <docs><![CDATA[打开看板扫码登录，在设置中选择需要的功能。详细说明：https://github.com/VOfficial404/metrix-bar/tree/main/dashboards/bilibili#readme]]></docs>
   <script apis="localStorage shell auth match-media"><![CDATA[
