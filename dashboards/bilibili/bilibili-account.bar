@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.17.0" category="social" icon="tv"
+     version="1.17.1" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -45,8 +45,8 @@
     </input>
     <input name="follower_chart_height" type="integer" label="账户 · 曲线高度" default="100"
            help="填写 80–240 的整数，默认 100；仅调整绘图区高度，单位为逻辑像素。清空或超出范围时使用 100。" />
-    <input name="account_panel_height" type="integer" label="账户 · 窗口高度" default="560"
-           help="填写 280–900 的整数，默认 560；内容超出时可滚动，底部刷新入口固定。清空或超出范围时使用 560。" />
+    <input name="account_panel_height" type="integer" label="账户 · 窗口高度上限" default="560"
+           help="填写 280–900 的整数，默认 560；窗口随已开启模块自动收紧，超过上限时滚动。清空或超出范围时使用 560。" />
     <input name="show_videos" type="bool" label="视频 · 启用视频页" default="true" />
     <input name="video_count" type="select" label="视频 · 最近投稿数量" default="5">
       <option value="3" label="3 条" />
@@ -1369,13 +1369,39 @@ function LoginPanel(width) {
         text(action, { fontSize: 13, fontWeight: active ? 400 : 500, textColor: active ? "textMuted" : "surface" }))),
     problem && times.account ? note("上次成功：" + stamp(times.account)) : null);
 }
+function accountPreferredHeight(now) {
+  const { identity, followers: totals, daily, level } = accountSizes;
+  // Match the native rows, text line heights and padding; disabled modules reserve no space.
+  let height = 24 + 40 + 1 + 24 + 24, modules = 0;
+  if (tabs.length > 1) height += 34 + 8;
+  if (features.identity) { height += identity.identityHeight; modules++; }
+  if (features.followers) {
+    height += totals.padding * 2 + (totals.compact ? totals.value * 4 / 3 : 16 + totals.gap + totals.value * 4 / 3);
+    height += daily.padding * 2 + 44 / 3 + (daily.compact
+      ? 44 / 3 + daily.value * 4 / 3 + daily.gap * 2
+      : daily.value * 4 + daily.gap * 3);
+    const end = Date.parse(yesterdayDate(now) + "T00:00:00Z"), start = end - (followerChart.days - 1) * 86400000;
+    const available = (followerTrend || []).filter(row => row.day >= start && row.day <= end && row[followerChart.metric] != null).length;
+    height += 16 + 32 + 8 + 44 / 3 + (available ? followerChartHeight : 64);
+    if (available < followerChart.days) height += 36;
+    if (followerChartError) height += 36;
+    modules += 3;
+  }
+  if (features.level) {
+    height += level.padding * 2 + 20 + 4 + level.gap * 2 + (level.compact ? 11 : level.value - 4) * 4 / 3;
+    modules++;
+  }
+  height += Math.max(0, modules - 1) * 8;
+  for (const key of ["account", "followers", "followerDaily", "followerTrend"]) {
+    if (errors[key] && (key === "account" || features.followers)) height += 72;
+  }
+  return Math.min(accountPanelHeight, Math.ceil(height));
+}
 function panel(env) {
   const now = Date.now(), connected = account && login.phase === "idle" && !inputError;
   const accountPage = connected && tab === "account", padding = accountPage ? 12 : 16;
   const width = Math.max(200, Math.min(320, env.viewport?.width || 320)) - padding * 2;
-  const connectedHeight = tab === "dynamic" ? 440 : accountPage
-    ? features.followers ? accountPanelHeight : Math.min(accountPanelHeight, (features.level ? 280 : 208) + (tabs.length > 1 ? 40 : 0))
-    : 400;
+  const connectedHeight = tab === "dynamic" ? 440 : accountPage ? accountPreferredHeight(now) : 400;
   const contextMenu = [{ label: "重新扫码登录", onClick: () => startLogin() },
     { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") }];
   const identity = account ? `${account.uid}:${account.level}:${account.xp}` : "";

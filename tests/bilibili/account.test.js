@@ -199,6 +199,38 @@ describe("Bilibili dashboard behavior", () => {
     expect(w.render().tray.menu.some(item => item.label === "打开私信")).toBe(false);
   });
 
+  test("account height follows visible modules and chart size within the user limit", async () => {
+    const w = worker({ inputs: { account_panel_height: 900 } });
+    await w.refresh();
+    w.select("account");
+    const height = () => w.render().panel.props.preferredHeight;
+    const all = height();
+    w.env.inputs.show_identity = false;
+    await w.refresh();
+    const withoutIdentity = height();
+    expect(withoutIdentity).toBeLessThan(all);
+    w.env.inputs.show_level = false;
+    await w.refresh();
+    const withoutLevel = height();
+    expect(withoutLevel).toBeLessThan(withoutIdentity);
+    w.env.inputs.follower_chart_height = 180;
+    expect(height() - withoutLevel).toBe(80);
+    w.env.inputs.account_daily_size = "large";
+    const expanded = height();
+    expect(expanded).toBeGreaterThan(withoutLevel + 80);
+    w.env.inputs.account_panel_height = 280;
+    expect(height()).toBe(280);
+    expect(find(w.render(), "scroll-account").type).toBe("Scroll");
+    expect(find(w.render(), "refresh").props.disabled).toBe(false);
+    w.env.inputs.account_panel_height = 900;
+    expect(height()).toBe(expanded);
+    w.env.inputs.show_videos = false;
+    w.env.inputs.show_messages = false;
+    await w.refresh();
+    expect(height()).toBeLessThan(expanded);
+    expect(find(w.render(), "navigation")).toBeUndefined();
+  });
+
   test("account feature switches hide only their own metrics and can be re-enabled", async () => {
     const w = worker();
     await w.refresh();
