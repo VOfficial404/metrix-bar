@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.16.0" category="social" icon="tv"
+     version="1.17.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -23,6 +23,30 @@
     <input name="show_identity" type="bool" label="账户 · UID 与硬币" default="true" />
     <input name="show_followers" type="bool" label="账户 · 粉丝与关注" default="true" />
     <input name="show_level" type="bool" label="账户 · 等级与经验" default="true" />
+    <input name="account_identity_size" type="select" label="账户 · UID 与硬币尺寸" default="compact">
+      <option value="compact" label="紧凑" />
+      <option value="normal" label="正常" />
+      <option value="large" label="宽松" />
+    </input>
+    <input name="account_followers_size" type="select" label="账户 · 粉丝与关注尺寸" default="compact">
+      <option value="compact" label="紧凑" />
+      <option value="normal" label="正常" />
+      <option value="large" label="宽松" />
+    </input>
+    <input name="account_daily_size" type="select" label="账户 · 昨日统计尺寸" default="compact">
+      <option value="compact" label="紧凑" />
+      <option value="normal" label="正常" />
+      <option value="large" label="宽松" />
+    </input>
+    <input name="account_level_size" type="select" label="账户 · 等级与经验尺寸" default="compact">
+      <option value="compact" label="紧凑" />
+      <option value="normal" label="正常" />
+      <option value="large" label="宽松" />
+    </input>
+    <input name="follower_chart_height" type="integer" label="账户 · 曲线高度" default="100"
+           help="填写 80–240 的整数，默认 100；仅调整绘图区高度，单位为逻辑像素。清空或超出范围时使用 100。" />
+    <input name="account_panel_height" type="integer" label="账户 · 窗口高度" default="560"
+           help="填写 280–900 的整数，默认 560；内容超出时可滚动，底部刷新入口固定。清空或超出范围时使用 560。" />
     <input name="show_videos" type="bool" label="视频 · 启用视频页" default="true" />
     <input name="video_count" type="select" label="视频 · 最近投稿数量" default="5">
       <option value="3" label="3 条" />
@@ -131,6 +155,14 @@ const FOLLOWER_METRICS = [
   { value: "unfollow", label: "取关", color: "danger" },
   { value: "net", label: "净增", color: "accent" },
 ];
+const ACCOUNT_SIZES = {
+  compact: { compact: true, padding: 8, gap: 4, value: 14, identityHeight: 28 },
+  normal: { compact: false, padding: 12, gap: 8, value: 16, identityHeight: 34 },
+  large: { compact: false, padding: 16, gap: 12, value: 18, identityHeight: 42 },
+};
+const accountSizes = { identity: ACCOUNT_SIZES.compact, followers: ACCOUNT_SIZES.compact,
+  daily: ACCOUNT_SIZES.compact, level: ACCOUNT_SIZES.compact };
+let followerChartHeight = 100, accountPanelHeight = 560;
 let privateDisplay = "summary", privateLimit = 5, privateCardSize = "normal", conversations = null;
 let times = {}, errors = {}, loading = false, inflight = null, inflightGeneration = -1, refreshController = null;
 let tab = "messages";
@@ -448,6 +480,13 @@ function sync(env) {
     globalRefreshMinutes = nextGlobalMinutes;
   }
   privateCardSize = env.inputs.private_card_size === "compact" ? "compact" : "normal";
+  for (const key of ["identity", "followers", "daily", "level"]) {
+    const size = env.inputs["account_" + key + "_size"];
+    accountSizes[key] = ACCOUNT_SIZES[size === "normal" || size === "large" ? size : "compact"];
+  }
+  const chartHeight = env.inputs.follower_chart_height, panelHeight = env.inputs.account_panel_height;
+  followerChartHeight = Number.isSafeInteger(chartHeight) && chartHeight >= 80 && chartHeight <= 240 ? chartHeight : 100;
+  accountPanelHeight = Number.isSafeInteger(panelHeight) && panelHeight >= 280 && panelHeight <= 900 ? panelHeight : 560;
   let next = "";
   try { next = String($metrix.secret("sessdata") || "").trim(); } catch {}
   const limit = Number(env.inputs.video_count || "5");
@@ -1015,18 +1054,17 @@ function FollowerTrend(now) {
     min = Math.min(min, value);
     max = Math.max(max, value);
   }
-  return h("Column", { key: "follower-trend", gap: 8, padding: 12, radius: 12, background: "surfaceHover", width: "100%", minWidth: 0 },
+  return h("Column", { key: "follower-trend", label: "粉丝趋势", gap: 4, padding: 8, radius: 12, background: "surfaceHover", width: "100%", minWidth: 0 },
     h("Row", { width: "100%", alignItems: "center", gap: 8 },
-      text("粉丝趋势", { fontSize: 13, fontWeight: 500, grow: 1 }),
-      h("Select", { key: "follower-metric", label: "趋势指标", value: metric.value, width: 120,
+      h("Select", { key: "follower-metric", label: "粉丝趋势指标", value: metric.value, width: 104, minWidth: 0, maxWidth: 104, shrink: 0,
         items: FOLLOWER_METRICS.map(({ value, label }) => ({ value, label })),
-        onChange: value => saveFollowerChart({ ...followerChart, metric: value }) })),
-    h("Segmented", { key: "follower-range", label: "趋势时间范围", width: "100%", value: followerChart.days,
-      items: [7, 14, 30].map(days => ({ value: days, label: "近 " + days + " 天" })),
-      onChange: days => saveFollowerChart({ ...followerChart, days }) }),
+        onChange: value => saveFollowerChart({ ...followerChart, metric: value }) }),
+      h("Segmented", { key: "follower-range", label: "趋势时间范围", grow: 1, minWidth: 0, value: followerChart.days,
+        items: [7, 14, 30].map(days => ({ value: days, label: days + " 天" })),
+        onChange: days => saveFollowerChart({ ...followerChart, days }) })),
     followerChartError ? note(followerChartError, { key: "follower-chart-error", textColor: "warning", wrap: true }) : null,
     available ? h("Chart", { key: "follower-chart", type: "line", xKind: "category", labels, series,
-      curve: "monotone", height: 150, width: "100%", xTicks: 3, yTicks: 3, xDomain: [0, followerChart.days - 1],
+      curve: "monotone", height: followerChartHeight, width: "100%", xTicks: 3, yTicks: 3, xDomain: [0, followerChart.days - 1],
       yDomain: min === max ? [-1, 1] : [min < 0 ? min - (max - min) * 0.1 : 0, max > 0 ? max + (max - min) * 0.1 : 0],
       dots: true, legend: false, hover: true, appear: false,
       referenceLines: [{ value: 0, color: "border" }],
@@ -1041,8 +1079,9 @@ function Account(now) {
   const levelColor = LEVEL_COLORS[Math.min(account.level, 6)];
   const progress = account.next == null ? 1 : clamp((account.xp - account.floor) / (account.next - account.floor));
   const entered = motionAllowed() && barStarted !== null ? smoothOut(clamp((now - barStarted) / MOTION.bar)) : 1;
+  const { identity, followers: totals, daily: dailySize, level } = accountSizes;
   return h("Column", { gap: 8, width: "100%" },
-    features.identity ? h("Row", { key: "identity-details", height: 34, paddingX: 10, radius: 10, background: "surfaceHover",
+    features.identity ? h("Row", { key: "identity-details", height: identity.identityHeight, paddingX: identity.padding, radius: 10, background: "surfaceHover",
       width: "100%", minWidth: 0, gap: 10, alignItems: "center" },
       note("UID " + account.uid, { key: "uid", fontSize: 11, grow: 1, minWidth: 0, shrink: 1,
         singleLine: true, fontFeatures: "tnum", tooltip: "UID " + account.uid }),
@@ -1050,27 +1089,32 @@ function Account(now) {
         h("Icon", { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m12 8 4 4-4 4-4-4z"/></svg>',
           width: 14, height: 14, fontSize: 14, textColor: "textMuted" }),
         note("硬币", { fontSize: 11, singleLine: true }),
-        text(comma(account.coins), { key: "coins", fontSize: 13, fontWeight: 600, singleLine: true, fontFeatures: "tnum" }))) : null,
+        text(comma(account.coins), { key: "coins", fontSize: identity.value, fontWeight: 600, singleLine: true, fontFeatures: "tnum" }))) : null,
     features.followers ? sectionError("followers") : null,
-    features.followers ? h("Grid", { columns: 2, gap: 8, width: "100%" },
-      tile("粉丝总数", comma(followers?.count), "followers"),
-      tile("关注数量", comma(followers?.following), "following")) : null,
+    features.followers ? h("Grid", { key: "follower-totals", columns: 2, gap: 8, width: "100%" },
+      ...[["粉丝总数", followers?.count, "followers"], ["关注数量", followers?.following, "following"]].map(([label, value, key]) =>
+        h(totals.compact ? "Row" : "Column", { key: "tile-" + key, padding: totals.padding, gap: totals.gap, radius: 12,
+          background: "surfaceHover", width: "100%", minWidth: 0, tooltip: label + " " + comma(value) },
+          note(label, { fontSize: totals.compact ? 11 : 12, ...(totals.compact ? { grow: 1 } : {}), minWidth: 0 }),
+          text(comma(value), { key, fontSize: totals.value, fontFeatures: "tnum", minWidth: 0, wrap: true })))) : null,
     features.followers ? sectionError("followerDaily") : null,
-    features.followers ? h("Column", { gap: 8, padding: 12, radius: 12, background: "surfaceHover", width: "100%" },
-      [["昨日新增关注", "follower-follow", daily?.follow, "text"],
-        ["昨日取关", "follower-unfollow", daily?.unfollow, daily?.unfollow > 0 ? "danger" : "text"],
-        ["昨日净增", "follower-net", daily?.net, daily?.net > 0 ? "success" : daily?.net < 0 ? "danger" : "text"]]
-        .map(([label, key, value, color]) => h("Row", { width: "100%", alignItems: "center", gap: 8 },
-          note(label, { grow: 1, minWidth: 0 }),
-          text(value == null ? "—" : key === "follower-net" ? signed(value) : comma(value),
-            { key, fontSize: 16, fontFeatures: "tnum", textColor: color, singleLine: true }))),
-      note(daily ? daily.date + " · B 站统计"
+    features.followers ? h("Column", { key: "follower-daily", gap: dailySize.gap, padding: dailySize.padding, radius: 12, background: "surfaceHover", width: "100%" },
+      h(dailySize.compact ? "Grid" : "Column", { columns: 3, gap: dailySize.gap, width: "100%", minWidth: 0 },
+        [["昨日新增关注", "follower-follow", daily?.follow, "text"],
+          ["昨日取关", "follower-unfollow", daily?.unfollow, daily?.unfollow > 0 ? "danger" : "text"],
+          ["昨日净增", "follower-net", daily?.net, daily?.net > 0 ? "success" : daily?.net < 0 ? "danger" : "text"]]
+          .map(([label, key, value, color]) => h(dailySize.compact ? "Column" : "Row", {
+            width: "100%", minWidth: 0, gap: dailySize.gap, tooltip: label + " " + (value == null ? "—" : comma(value)) },
+            note(dailySize.compact ? label.slice(2) : label, { ...(dailySize.compact ? { fontSize: 11 } : { grow: 1 }), minWidth: 0 }),
+            text(value == null ? "—" : key === "follower-net" ? signed(value) : comma(value),
+              { key, fontSize: dailySize.value, fontFeatures: "tnum", textColor: color, wrap: true })))),
+      note(daily ? (dailySize.compact ? "昨日 · " : "") + daily.date + " · B 站统计"
         : "昨日统计暂不可用" + (followerDaily ? " · 最近统计 " + followerDaily.date : ""),
         { key: "follower-date", fontSize: 11, wrap: true,
           tooltip: "按北京时间自然日统计；昨日净增 = B 站昨日新增关注 − 昨日取关。服务端更新可能延迟。" })) : null,
     features.followers ? sectionError("followerTrend") : null,
     features.followers ? FollowerTrend(now) : null,
-    features.level ? h("Column", { gap: 8, padding: 12, radius: 12, background: "surfaceHover", width: "100%" },
+    features.level ? h("Column", { key: "level-details", gap: level.gap, padding: level.padding, radius: 12, background: "surfaceHover", width: "100%" },
       h("Row", { alignItems: "center", gap: 8, width: "100%" },
         text("Lv." + account.level, { key: "level", fontSize: 12, fontWeight: 600, height: 20,
           paddingX: 6, radius: 4, background: levelColor, textColor: "#FFFFFF", shrink: 0 }),
@@ -1080,7 +1124,8 @@ function Account(now) {
         note(account.next == null ? "已达最高等级" : "距下一级还需 " + comma(Math.max(0, account.next - account.xp)) + " EXP", { minWidth: 0, singleLine: true })),
       h("Box", { width: "100%", height: 4, radius: 2, background: "border", clip: true, label: "等级经验进度" },
         h("Box", { key: "level-progress", width: `${progress * entered * 100}%`, height: 4, radius: 2, background: levelColor })),
-      note("累计经验 " + comma(account.xp) + (account.next == null ? " · 已满级" : " / " + comma(account.next)), { key: "experience", fontFeatures: "tnum" })) : null,
+      note("累计经验 " + comma(account.xp) + (account.next == null ? " · 已满级" : " / " + comma(account.next)),
+        { key: "experience", fontSize: level.compact ? 11 : level.value - 4, fontFeatures: "tnum", wrap: true })) : null,
     !features.identity && !features.followers && !features.level
       ? note("在看板设置中开启需要的功能。", { key: "no-features", wrap: true }) : null);
 }
@@ -1326,9 +1371,11 @@ function LoginPanel(width) {
 }
 function panel(env) {
   const now = Date.now(), connected = account && login.phase === "idle" && !inputError;
-  const width = Math.max(200, Math.min(320, env.viewport?.width || 320)) - 32;
-  const compactAccount = tabs.length === 1 && tabs[0].id === "account" && !features.followers;
-  const connectedHeight = tab === "dynamic" ? 440 : tab === "account" && features.followers ? 800 : compactAccount ? (features.level ? 280 : 208) : 400;
+  const accountPage = connected && tab === "account", padding = accountPage ? 12 : 16;
+  const width = Math.max(200, Math.min(320, env.viewport?.width || 320)) - padding * 2;
+  const connectedHeight = tab === "dynamic" ? 440 : accountPage
+    ? features.followers ? accountPanelHeight : Math.min(accountPanelHeight, (features.level ? 280 : 208) + (tabs.length > 1 ? 40 : 0))
+    : 400;
   const contextMenu = [{ label: "重新扫码登录", onClick: () => startLogin() },
     { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") }];
   const identity = account ? `${account.uid}:${account.level}:${account.xp}` : "";
@@ -1340,7 +1387,7 @@ function panel(env) {
     : login.phase === "error" || login.phase === "expired" || (credential && inputError) ? 240 : 208;
   return h("Column", { preferredWidth: 320, preferredHeight: connected ? connectedHeight : loginHeight, safeArea: true,
     width: "100%", height: "100%", maxWidth: 320, minHeight: 0, minWidth: 0,
-    padding: 16, gap: 12, radius: 24, background: "surface", textColor: "text", fontSize: 13,
+    padding, gap: accountPage ? 8 : 12, radius: 24, background: "surface", textColor: "text", fontSize: 13,
     contextMenu, shortcuts: { "CmdOrCtrl+R": () => requestRefresh() } },
     connected ? IdentityHeader() : h("Row", { gap: 12, alignItems: "center", width: "100%" },
       h("Box", { width: 40, height: 40, radius: 20, background: "accentSubtle", alignItems: "center", justify: "center" },
