@@ -1571,112 +1571,107 @@ const dynamicRequests = w => w.requests.filter(({ url }) => url.pathname === DYN
 const change = (w, key, next) => find(w.render(), key).props.onChange(next);
 const menuEntries = w => find(w.render(), "menu-button").props.menu;
 const menuPages = w => menuEntries(w).filter(item => ["消息", "视频", "账户", "动态"].includes(item.label)).map(item => item.label);
-const openMenuSettings = w => menuEntries(w).find(item => item.label === "菜单管理").onClick();
 function openDynamicFilter(w) {
   w.select("dynamic");
   w.click("dynamic-filter-toggle");
 }
 
-describe("persistent panel menu preferences", () => {
-  test("ordering persists across restart and keeps the active page while moving it", async () => {
+describe("native menu settings", () => {
+  test("native order changes retain the active page and saved inputs select the first page after restart", async () => {
     const feed = dynamicFeed();
-    const store = new Map();
-    const w = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
-    await w.refresh();
-    w.select("dynamic");
-    openMenuSettings(w);
-    w.click("menu-up-dynamic");
-    w.click("menu-settings-close");
-    expect(menuPages(w)).toEqual(["动态", "消息", "视频", "账户"]);
-    expect(find(w.render(), "page-dynamic").props.ignoreInput).toBe(false);
-    expect(JSON.parse(store.get("navigation:v1"))).toEqual({ order: ["dynamic", "messages", "videos", "account"], hidden: [], visible: true });
-    const restarted = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
-    await restarted.refresh();
-    expect(menuPages(restarted)).toEqual(["动态", "消息", "视频", "账户"]);
-    expect(find(restarted.render(), "page-dynamic").props.ignoreInput).toBe(false);
-  });
-
-  test("hidden tab strip retains header navigation and resets with page visibility", async () => {
-    const w = worker();
-    await w.refresh();
-    openMenuSettings(w);
-    change(w, "menu-visible", false);
-    await change(w, "menu-enable-videos", false);
-    w.click("menu-settings-close");
-    expect(find(w.render(), "navigation")).toBeUndefined();
-    expect(menuPages(w)).toEqual(["消息", "账户"]);
-    menuEntries(w).find(item => item.label === "账户").onClick();
-    expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
-    expect(JSON.parse(w.store.get("navigation:v1"))).toMatchObject({ hidden: ["videos"], visible: false });
-    openMenuSettings(w);
-    await w.click("menu-reset");
-    w.click("menu-settings-close");
-    expect(find(w.render(), "navigation")).toBeDefined();
-    expect(menuPages(w)).toEqual(["消息", "视频", "账户"]);
-  });
-
-  test("hiding the active page falls back and suppresses optional requests without mutating native inputs", async () => {
-    const w = worker({ inputs: { show_videos: true, show_video_likes: false } });
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
     await w.refresh();
     w.select("videos");
-    openMenuSettings(w);
-    await change(w, "menu-enable-videos", false);
-    await change(w, "menu-enable-messages", false);
-    w.click("menu-settings-close");
+    const before = w.requests.length;
+    w.env.inputs.menu_order = "account,videos,messages,dynamic";
+    expect(menuPages(w)).toEqual(["账户", "视频", "消息", "动态"]);
+    expect(find(w.render(), "page-videos").props.ignoreInput).toBe(false);
+    expect(w.requests.length).toBe(before);
+    const restarted = worker({ inputs: { ...w.env.inputs }, intercept: feed.intercept });
+    await restarted.refresh();
+    expect(menuPages(restarted)).toEqual(["账户", "视频", "消息", "动态"]);
+    expect(find(restarted.render(), "page-account").props.ignoreInput).toBe(false);
+  });
+
+  test("hiding the tab strip retains menu navigation and enabled requests", async () => {
+    const w = worker();
+    await w.refresh();
+    w.env.inputs.show_tab_bar = false;
+    expect(find(w.render(), "navigation")).toBeUndefined();
+    menuEntries(w).find(item => item.label === "账户").onClick();
+    expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
+    const before = w.requests.length;
+    await w.refresh();
+    const requested = w.requests.slice(before).map(({ url }) => url.pathname);
+    for (const path of [NAV, FANS, LIST, PRIVATE]) expect(requested).toContain(path);
+    w.env.inputs.show_tab_bar = true;
+    expect(find(w.render(), "navigation")).toBeDefined();
+    expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
+  });
+
+  test("page switches suppress requests, fall back to an enabled page and preserve subordinate choices", async () => {
+    const w = worker({ inputs: { show_identity: false, show_followers: true, show_level: true, show_video_likes: false } });
+    await w.refresh();
+    w.select("videos");
+    w.env.inputs.show_videos = false;
+    w.env.inputs.show_messages = false;
     expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
     const before = w.requests.length;
     await w.refresh();
     expect(w.requests.slice(before).map(({ url }) => url.pathname).sort()).toEqual([NAV, FANS].sort());
-    expect(w.env.inputs.show_videos).toBe(true);
-    expect(w.env.inputs.show_video_likes).toBe(false);
-    openMenuSettings(w);
-    await change(w, "menu-enable-account", false);
-    w.click("menu-settings-close");
+    w.env.inputs.show_account = false;
     for (const key of ["uid", "coins", "followers", "level", "navigation"]) expect(find(w.render(), key)).toBeUndefined();
-    expect(find(w.render(), "menu-button")).toBeDefined();
+    expect(find(w.render(), "no-features")).toBeDefined();
+    expect(find(w.render(), "menu-button")).toBeUndefined();
+    expect(w.render().tray.menu.some(item => item.label === "页面")).toBe(false);
+    expect(w.render().tray.title).not.toContain("粉丝");
     const allOff = w.requests.length;
     await w.refresh();
     expect(w.requests.slice(allOff).map(({ url }) => url.pathname)).toEqual([NAV]);
-    openMenuSettings(w);
-    await change(w, "menu-enable-videos", true);
-    w.click("menu-settings-close");
+    expect(w.env.inputs).toMatchObject({ show_identity: false, show_followers: true, show_level: true, show_video_likes: false });
+    w.env.inputs.show_account = true;
+    w.env.inputs.show_videos = true;
     await w.refresh();
+    expect(find(w.render(), "followers")).toBeDefined();
+    expect(find(w.render(), "level")).toBeDefined();
+    expect(find(w.render(), "uid")).toBeUndefined();
     expect(find(w.render(), "page-videos")).toBeDefined();
     expect(find(w.render(), "BV1FixtureNew-点赞")).toBeUndefined();
   });
 
-  test("native switches remain the upper gate after restoring local menu settings", async () => {
-    const w = worker({ inputs: { show_videos: false, show_messages: false } });
-    await w.refresh();
-    openMenuSettings(w);
-    for (const id of ["videos", "messages", "dynamic"]) expect(find(w.render(), "menu-enable-" + id).props.disabled).toBe(true);
-    w.click("menu-reset");
-    w.click("menu-settings-close");
-    expect(menuPages(w)).toEqual(["账户"]);
-    expect(w.requests.some(({ url }) => [LIST, VIEW, DYNAMIC, PRIVATE].includes(url.pathname))).toBe(false);
-  });
-
-  test("malformed stored navigation is normalized to one copy of every supported page", async () => {
-    const store = new Map([["navigation:v1", JSON.stringify({ order: ["dynamic", "dynamic", "unknown", "account"], hidden: ["unknown"], visible: true })]]);
+  test("obsolete local menu choices cannot override native settings", async () => {
+    const store = new Map([["navigation:v1", JSON.stringify({ order: ["account", "videos", "messages", "dynamic"],
+      hidden: ["messages", "videos", "account", "dynamic"], visible: false })]]);
     const feed = dynamicFeed();
-    const w = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
+    const w = worker({ store, inputs: { menu_order: "dynamic,messages,videos,account", show_dynamic: true,
+      show_tab_bar: true, show_account: true }, intercept: feed.intercept });
     await w.refresh();
-    expect(menuPages(w)).toEqual(["动态", "账户", "消息", "视频"]);
+    expect(menuPages(w)).toEqual(["动态", "消息", "视频", "账户"]);
     expect(find(w.render(), "page-dynamic").props.ignoreInput).toBe(false);
+    expect(find(w.render(), "navigation")).toBeDefined();
+    expect(find(w.render(), "followers")).toBeDefined();
   });
 
-  test("menu persistence failures surface a safe error and retain saved choices", async () => {
-    const store = new Map();
-    store.set = () => { throw new Error("synthetic-storage-secret"); };
-    const w = worker({ store, inputs: { show_followers: false, show_videos: false } });
+  test("disabling the account page discards pending follower failures and re-enabling restores its selected content", async () => {
+    let defer = false, release;
+    const w = worker({ inputs: { show_identity: false }, intercept: url => {
+      if (url.pathname === FANS && defer) return new Promise(resolve => { release = resolve; });
+    } });
     await w.refresh();
-    openMenuSettings(w);
-    const before = JSON.stringify(w.render());
-    change(w, "menu-visible", false);
-    expect(find(w.render(), "menu-visible").props.value).toBe(true);
-    expect(JSON.stringify(w.render())).not.toBe(before);
-    expect(JSON.stringify(w.render())).not.toContain("synthetic-storage-secret");
-    expect(store.has("navigation:v1")).toBe(false);
+    defer = true;
+    const pending = w.refresh();
+    await w.flush();
+    w.env.inputs.show_account = false;
+    expect(find(w.render(), "page-account")).toBeUndefined();
+    release({ code: -352 });
+    await pending;
+    expect(w.render().tray.error).toBe("");
+    expect(find(w.render(), "followers")).toBeUndefined();
+    defer = false;
+    w.env.inputs.show_account = true;
+    await w.refresh();
+    expect(find(w.render(), "followers")).toBeDefined();
+    expect(find(w.render(), "uid")).toBeUndefined();
   });
 });
 
@@ -1993,8 +1988,8 @@ describe("dynamic feed and author preferences", () => {
     expect(find(w.render(), "error-dynamic")).toBeUndefined();
   });
 
-  test("native disable, local hide and stop abort pending pages and reject late success or failure", async () => {
-    for (const action of ["native-disable", "local-hide", "stop"]) {
+  test("native disable and stop abort pending pages and reject late success or failure", async () => {
+    for (const action of ["native-disable", "stop"]) {
       for (const failure of [false, true]) {
         const feed = dynamicFeed([dynamicItem()]);
         feed.state.offset = "page-2";
@@ -2012,8 +2007,7 @@ describe("dynamic feed and author preferences", () => {
         await w.flush();
         expect(signal).toBeDefined();
         if (action === "stop") await w.event("lifecycle", { type: "stop" });
-        else if (action === "native-disable") { w.env.inputs.show_dynamic = false; w.render(); }
-        else { openMenuSettings(w); change(w, "menu-enable-dynamic", false); w.click("menu-settings-close"); }
+        else { w.env.inputs.show_dynamic = false; w.render(); }
         expect(signal.aborted).toBe(true);
         const before = dynamicRequests(w).length;
         release(failure ? { code: -352 } : dynamicPayload([dynamicItem(DYNAMIC_IDS[2])]));

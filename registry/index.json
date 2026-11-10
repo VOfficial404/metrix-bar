@@ -8,7 +8,7 @@
       "id": "bilibili-account",
       "name": "哔哩哔哩账户",
       "protocol_version": "0",
-      "version": "1.8.2",
+      "version": "1.9.0",
       "category": "social",
       "placements": [
         "menubar"
@@ -20,8 +20,8 @@
       "license": "AGPL-3.0-only",
       "homepage": "https://github.com/VOfficial404/metrix-bar",
       "docs": "打开看板扫码登录，在设置中选择需要的功能。详细说明：https://github.com/VOfficial404/metrix-bar/tree/main/dashboards/bilibili#readme",
-      "sha256": "6677c9a02dd92f1f8bce7d970e404710cae6ae50f68b8e4263e78a80a6c0ae98",
-      "file": "bilibili/bilibili-account.6677c9a02dd92f1f8bce7d970e404710cae6ae50f68b8e4263e78a80a6c0ae98.bar"
+      "sha256": "5ce8826451c1c45f337ce546bdb4ac87cd906eb51da71633c157315c68766535",
+      "file": "bilibili/bilibili-account.5ce8826451c1c45f337ce546bdb4ac87cd906eb51da71633c157315c68766535.bar"
     }
   ]
 }

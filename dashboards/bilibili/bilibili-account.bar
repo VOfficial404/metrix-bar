@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.8.2" category="social" icon="tv"
+     version="1.9.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -13,6 +13,34 @@
     <network origin="https://i2.hdslb.com" />
   </permissions>
   <inputs>
+    <input name="show_tab_bar" type="bool" label="菜单 · 显示标签栏" default="true" help="关闭后仍可通过顶部菜单切换页面。" />
+    <input name="menu_order" type="select" label="菜单 · 页面顺序" default="messages,dynamic,videos,account">
+      <option value="messages,dynamic,videos,account" label="消息 → 动态 → 视频 → 账户" />
+      <option value="messages,dynamic,account,videos" label="消息 → 动态 → 账户 → 视频" />
+      <option value="messages,videos,dynamic,account" label="消息 → 视频 → 动态 → 账户" />
+      <option value="messages,videos,account,dynamic" label="消息 → 视频 → 账户 → 动态" />
+      <option value="messages,account,dynamic,videos" label="消息 → 账户 → 动态 → 视频" />
+      <option value="messages,account,videos,dynamic" label="消息 → 账户 → 视频 → 动态" />
+      <option value="dynamic,messages,videos,account" label="动态 → 消息 → 视频 → 账户" />
+      <option value="dynamic,messages,account,videos" label="动态 → 消息 → 账户 → 视频" />
+      <option value="dynamic,videos,messages,account" label="动态 → 视频 → 消息 → 账户" />
+      <option value="dynamic,videos,account,messages" label="动态 → 视频 → 账户 → 消息" />
+      <option value="dynamic,account,messages,videos" label="动态 → 账户 → 消息 → 视频" />
+      <option value="dynamic,account,videos,messages" label="动态 → 账户 → 视频 → 消息" />
+      <option value="videos,messages,dynamic,account" label="视频 → 消息 → 动态 → 账户" />
+      <option value="videos,messages,account,dynamic" label="视频 → 消息 → 账户 → 动态" />
+      <option value="videos,dynamic,messages,account" label="视频 → 动态 → 消息 → 账户" />
+      <option value="videos,dynamic,account,messages" label="视频 → 动态 → 账户 → 消息" />
+      <option value="videos,account,messages,dynamic" label="视频 → 账户 → 消息 → 动态" />
+      <option value="videos,account,dynamic,messages" label="视频 → 账户 → 动态 → 消息" />
+      <option value="account,messages,dynamic,videos" label="账户 → 消息 → 动态 → 视频" />
+      <option value="account,messages,videos,dynamic" label="账户 → 消息 → 视频 → 动态" />
+      <option value="account,dynamic,messages,videos" label="账户 → 动态 → 消息 → 视频" />
+      <option value="account,dynamic,videos,messages" label="账户 → 动态 → 视频 → 消息" />
+      <option value="account,videos,messages,dynamic" label="账户 → 视频 → 消息 → 动态" />
+      <option value="account,videos,dynamic,messages" label="账户 → 视频 → 动态 → 消息" />
+    </input>
+    <input name="show_account" type="bool" label="账户 · 启用账户页" default="true" help="关闭账户页及托盘粉丝统计，保留下面的细分选择。" />
     <input name="show_identity" type="bool" label="账户 · UID 与硬币" default="true" />
     <input name="show_followers" type="bool" label="账户 · 粉丝与关注" default="true" />
     <input name="show_level" type="bool" label="账户 · 等级与经验" default="true" />
@@ -122,39 +150,14 @@ let times = {}, errors = {}, loading = false, inflight = null, inflightGeneratio
 let tab = "messages";
 // --stage-* maps to native background/text/textMuted/border/surface/accent/accentText.
 const TABS = [{ id: "messages", label: "消息" }, { id: "dynamic", label: "动态" }, { id: "videos", label: "视频" }, { id: "account", label: "账户" }];
-let menuSettingsOpen = false, preferenceError = "";
-function readNavigation() {
-  let saved;
-  try { saved = JSON.parse(localStorage.getItem("navigation:v1") || "null"); } catch {}
-  const ids = TABS.map(item => item.id);
-  return { order: [...new Set([...(Array.isArray(saved?.order) ? saved.order.filter(id => ids.includes(id)) : []), ...ids])],
-    hidden: Array.isArray(saved?.hidden) ? ids.filter(id => saved.hidden.includes(id)) : [], visible: saved?.visible !== false };
-}
-let navigation = readNavigation();
-function orderedTabs() { return navigation.order.map(id => TABS.find(item => item.id === id)); }
+const DEFAULT_MENU_ORDER = "messages,dynamic,videos,account";
+let menuOrder = DEFAULT_MENU_ORDER, showTabBar = true;
 function updateTabs(initial = false) {
-  tabs = orderedTabs().filter(item => !navigation.hidden.includes(item.id) && (item.id === "account"
-    ? features.identity || features.followers || features.level : item.id === "messages" ? messagesEnabled() : features[item.id]));
+  tabs = menuOrder.split(",").map(id => TABS.find(item => item.id === id)).filter(item => item.id === "account"
+    ? features.identity || features.followers || features.level : item.id === "messages" ? messagesEnabled() : features[item.id]);
   if (!tabs.length) tabs = [TABS.find(item => item.id === "account")];
   if (initial || !tabs.some(item => item.id === tab)) tab = tabs[0].id;
   stopMotion();
-}
-function saveNavigation(next) {
-  try { localStorage.setItem("navigation:v1", JSON.stringify(next)); }
-  catch { preferenceError = "菜单设置保存失败，请重试。"; $metrix.invalidate(); return; }
-  const changedVisibility = next.hidden.join() !== navigation.hidden.join();
-  navigation = next;
-  preferenceError = "";
-  sync(lastEnv);
-  updateTabs();
-  $metrix.invalidate();
-  if (changedVisibility) return refresh();
-}
-function moveMenu(id, direction) {
-  const order = [...navigation.order], from = order.indexOf(id), to = from + direction;
-  if (from < 0 || to < 0 || to >= order.length) return;
-  [order[from], order[to]] = [order[to], order[from]];
-  return saveNavigation({ ...navigation, order });
 }
 const VIDEO_STATS = [
   { option: "video_views", label: "播放", field: "views", api: "view" },
@@ -164,7 +167,7 @@ const VIDEO_STATS = [
   { option: "video_comments", label: "评论", field: "replies", api: "reply" },
 ];
 const NOTIFICATION_FEATURE_KEYS = ["message_likes", "message_replies", "message_mentions", "message_system", "message_assistant"];
-const FEATURE_KEYS = ["identity", "followers", "level", "videos", "messages", "dynamic", "video_cover", "video_date",
+const FEATURE_KEYS = ["account", "identity", "followers", "level", "videos", "messages", "dynamic", "video_cover", "video_date",
   ...VIDEO_STATS.map(stat => stat.option), "message_private", ...NOTIFICATION_FEATURE_KEYS];
 let features = Object.fromEntries(FEATURE_KEYS.map(key => [key, true])), tabs = TABS;
 let dynamics = null, dynamicController = null, dynamicInflight = null;
@@ -444,13 +447,18 @@ function sync(env) {
   const requestedPrivateLimit = Number(env.inputs.private_count || "5");
   const nextPrivateLimit = [3, 5, 10].includes(requestedPrivateLimit) ? requestedPrivateLimit : 5;
   const nextFeatures = Object.fromEntries(FEATURE_KEYS.map(key => [key, env.inputs["show_" + key] !== false]));
-  for (const id of navigation.hidden) {
-    if (id === "account") for (const key of ["identity", "followers", "level"]) nextFeatures[key] = false;
-    else nextFeatures[id] = false;
-  }
+  if (!nextFeatures.account) for (const key of ["identity", "followers", "level"]) nextFeatures[key] = false;
+  const nextMenuOrder = env.inputs.menu_order || DEFAULT_MENU_ORDER;
+  const nextShowTabBar = env.inputs.show_tab_bar !== false;
+  const menuChanged = nextMenuOrder !== menuOrder || nextShowTabBar !== showTabBar;
+  menuOrder = nextMenuOrder;
+  showTabBar = nextShowTabBar;
   const featuresChanged = FEATURE_KEYS.some(key => nextFeatures[key] !== features[key]);
   if (initialized && next === credential && limit === videoLimit && rate === privateRate
-      && display === privateDisplay && nextPrivateLimit === privateLimit && !featuresChanged) return;
+      && display === privateDisplay && nextPrivateLimit === privateLimit && !featuresChanged) {
+    if (menuChanged) updateTabs();
+    return;
+  }
   const changedAccount = !initialized || next !== credential;
   const firstSync = !initialized;
   initialized = true;
@@ -1118,6 +1126,7 @@ function Messages() {
       ? note("回复及 @ 合并计数：" + comma(n.combined), { key: "notice-combined" }) : null);
 }
 function IdentityHeader(now) {
+  const menu = pageMenu();
   return h("Row", { width: "100%", alignItems: "center", gap: 12, shrink: 0 },
     h("ButtonBase", { key: "login-start", width: 40, height: 40, padding: 0, radius: 20,
       background: "accentSubtle", alignItems: "center", justify: "center", onClick: () => startLogin(),
@@ -1126,7 +1135,7 @@ function IdentityHeader(now) {
         width: 40, height: 40, radius: 20, fit: "cover", label: account.name + "的头像" })),
     text(account.name, { key: "account-name", fontSize: 16, fontWeight: 500, grow: 1, minWidth: 0,
       singleLine: true, tooltip: account.name, onClick: launch("https://space.bilibili.com/" + account.uid) }),
-    h("MenuButton", { key: "menu-button", label: "菜单", shrink: 0, menu: pageMenu() }),
+    menu.length ? h("MenuButton", { key: "menu-button", label: "菜单", shrink: 0, menu }) : null,
     RefreshButton(now));
 }
 function RefreshButton(now) {
@@ -1139,33 +1148,8 @@ function RefreshButton(now) {
         rotate: refreshAngle(now), transformOrigin: [0.5, 0.5] }), text("刷新", { fontSize: 13, fontWeight: 500 })));
 }
 function pageMenu() {
-  return [...tabs.map(item => ({ label: item.label, checked: tab === item.id && !menuSettingsOpen,
-    onClick: () => { menuSettingsOpen = false; selectTab(item.id); $metrix.invalidate(); } })),
-    { separator: true }, { label: "菜单管理", onClick: () => { menuSettingsOpen = true; $metrix.invalidate(); } }];
-}
-function MenuSettings() {
-  return h("Scroll", { grow: 1, minHeight: 0, width: "100%" }, h("Column", { gap: 10, width: "100%", paddingRight: 16 },
-    h("Row", { gap: 8, alignItems: "center", width: "100%" }, text("菜单管理", { grow: 1, fontWeight: 600 }),
-      h("Button", { key: "menu-settings-close", text: "完成", onClick: () => { menuSettingsOpen = false; $metrix.invalidate(); } })),
-    h("Row", { gap: 8, alignItems: "center", width: "100%" }, text("显示标签栏", { grow: 1 }),
-      h("Switch", { key: "menu-visible", label: "显示标签栏", value: navigation.visible,
-        onChange: value => saveNavigation({ ...navigation, visible: value === true }) })),
-    note("关闭标签栏后，仍可从顶部菜单切换页面。", { wrap: true }),
-    orderedTabs().map((item, index) => {
-      const inputs = lastEnv.inputs;
-      const available = item.id === "account" ? ["identity", "followers", "level"].some(key => inputs["show_" + key] !== false)
-        : inputs["show_" + item.id] !== false && (item.id !== "messages"
-          || ["message_private", ...NOTIFICATION_FEATURE_KEYS].some(key => inputs["show_" + key] !== false));
-      return h("Column", { key: "menu-row-" + item.id, gap: 4, width: "100%" },
-        h("Row", { gap: 6, alignItems: "center", width: "100%" }, text(item.label, { grow: 1 }),
-          h("Button", { key: "menu-up-" + item.id, text: "上移", label: "上移" + item.label, disabled: index === 0, onClick: () => moveMenu(item.id, -1) }),
-          h("Button", { key: "menu-down-" + item.id, text: "下移", label: "下移" + item.label, disabled: index === TABS.length - 1, onClick: () => moveMenu(item.id, 1) }),
-          h("Switch", { key: "menu-enable-" + item.id, label: "启用" + item.label, disabled: !available,
-            value: available && !navigation.hidden.includes(item.id), onChange: value => saveNavigation({ ...navigation,
-              hidden: value ? navigation.hidden.filter(id => id !== item.id) : [...new Set([...navigation.hidden, item.id])] }) })),
-        !available ? note("请先在看板设置中启用此页内容。", { wrap: true }) : null);
-    }),
-    h("Button", { key: "menu-reset", text: "恢复菜单默认设置", onClick: () => saveNavigation({ order: TABS.map(item => item.id), hidden: [], visible: true }) })));
+  return tabs.filter(item => item.id !== "account" || features.identity || features.followers || features.level)
+    .map(item => ({ label: item.label, checked: tab === item.id, onClick: () => selectTab(item.id) }));
 }
 function Navigation(width, now) {
   const pill = h("Box", { key: "tab-pill", width: (width - 6) / tabs.length, height: 28,
@@ -1222,10 +1206,9 @@ function panel(env) {
   const now = Date.now(), connected = account && login.phase === "idle" && !inputError;
   const width = Math.max(200, Math.min(320, env.viewport?.width || 320)) - 32;
   const compactAccount = tabs.length === 1 && tabs[0].id === "account" && !features.followers;
-  const connectedHeight = menuSettingsOpen || tab === "dynamic" ? 440 : compactAccount ? (features.level ? 280 : 208) : 400;
+  const connectedHeight = tab === "dynamic" ? 440 : compactAccount ? (features.level ? 280 : 208) : 400;
   const contextMenu = [{ label: "重新扫码登录", onClick: () => startLogin() },
-    { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") },
-    { label: "菜单管理", onClick: () => { menuSettingsOpen = true; $metrix.invalidate(); } }];
+    { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") }];
   const identity = account ? `${account.uid}:${account.level}:${account.xp}` : "";
   if (identity !== barIdentity) {
     barIdentity = identity;
@@ -1242,10 +1225,9 @@ function panel(env) {
         h("Icon", { svg: MARK, width: 22, height: 22, fontSize: 22, textColor: "accent" })),
       h("Column", { gap: 0, grow: 1, minWidth: 0 },
         text("哔哩哔哩", { fontSize: 16, fontWeight: 500 }), note(account ? "切换账户" : "账户登录"))),
-    connected && !menuSettingsOpen && navigation.visible && tabs.length > 1 ? Navigation(width, now) : null,
-    preferenceError ? note(preferenceError, { textColor: "warning", wrap: true }) : null,
+    connected && showTabBar && tabs.length > 1 ? Navigation(width, now) : null,
     connected ? sectionError("account") : null,
-    connected ? menuSettingsOpen ? MenuSettings() : Pages(now) : h("Scroll", { grow: 1, minHeight: 0, width: "100%" },
+    connected ? Pages(now) : h("Scroll", { grow: 1, minHeight: 0, width: "100%" },
       login.phase !== "idle" || inputError || errors.account ? LoginPanel(width)
         : h("Column", { gap: 12, padding: 12, radius: 12, background: "surfaceHover", width: "100%", alignItems: "center" },
           h("Loading", { size: 24, label: "读取账户" }), note("正在读取账户…"))),
@@ -1265,13 +1247,14 @@ export default {
   render(env) {
     sync(env);
     const delta = followers?.delta;
+    const pages = pageMenu();
     const title = features.followers && followers ? "粉丝 " + comma(followers.count) + (delta ? " (" + signed(delta) + ")" : "") : account?.name || "哔哩哔哩";
     return { tray: { icon: "data:image/svg+xml," + encodeURIComponent(MARK), iconTemplate: true, title,
       tooltip: account ? account.name + (features.identity ? " · UID " + account.uid : "") : "连接自己的 B 站账户",
       error: inputError || Object.values(errors).join("；"),
       menu: [{ label: "刷新", disabled: loading || !!inputError, onClick: () => requestRefresh() },
         { label: "扫码登录", onClick: () => startLogin() },
-        { label: "页面", items: pageMenu() },
+        pages.length ? { label: "页面", items: pages } : null,
         privateEnabled() ? { label: "打开私信", onClick: launch("https://message.bilibili.com/#/whisper") } : null].filter(Boolean) }, panel: panel(env) };
   },
   async event(name, payload) {
