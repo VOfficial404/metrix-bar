@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.8.1" category="social" icon="tv"
+     version="1.8.2" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -121,7 +121,7 @@ let privateDisplay = "summary", privateLimit = 5, privateCardSize = "normal", co
 let times = {}, errors = {}, loading = false, inflight = null, inflightGeneration = -1, refreshController = null;
 let tab = "messages";
 // --stage-* maps to native background/text/textMuted/border/surface/accent/accentText.
-const TABS = [{ id: "messages", label: "消息" }, { id: "videos", label: "视频" }, { id: "account", label: "账户" }, { id: "dynamic", label: "动态" }];
+const TABS = [{ id: "messages", label: "消息" }, { id: "dynamic", label: "动态" }, { id: "videos", label: "视频" }, { id: "account", label: "账户" }];
 let menuSettingsOpen = false, preferenceError = "";
 function readNavigation() {
   let saved;
