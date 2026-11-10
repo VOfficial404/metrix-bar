@@ -4,30 +4,45 @@
 
 ## 看板
 
-| 看板 | 介绍 |
-| --- | --- |
-| [BiliBili](dashboards/bilibili/) | 扫码登录，按需启用账户指标、粉丝、视频和未读消息。视频显示五项统计及采样变化；私信可选最近会话卡片。整体每 6 小时刷新，私信独立刷新默认每 10 分钟。 |
+| 看板 | 功能 | 自动刷新 |
+| --- | --- | --- |
+| [BiliBili](dashboards/bilibili/README.md) | 扫码登录；账户与粉丝指标、投稿统计、未读消息及最近私信、可按作者筛选的动态；页面可排序、按需开关 | 整体每 1 小时；私信默认每 10 分钟，可单独配置 |
 
 ## 安装
 
-在 **Metrix.Bar → 设置 → 看板源** 中添加：
+1. 打开 **Metrix.Bar → 设置 → 看板源**。
+2. 添加以下索引地址，安装 BiliBili 看板。
+3. 按[模块说明](dashboards/bilibili/README.md)扫码登录并配置页面。
 
 ```text
 https://raw.githubusercontent.com/VOfficial404/metrix-bar/main/registry/index.json
 ```
 
-或复制以下地址到浏览器打开：
+也可将以下地址复制到浏览器，唤起 Metrix.Bar 添加看板源：
 
 ```text
 metrixbar://registry/add?url=https%3A%2F%2Fraw.githubusercontent.com%2FVOfficial404%2Fmetrix-bar%2Fmain%2Fregistry%2Findex.json
 ```
 
-各看板的登录方式、使用说明和预览见对应目录；BiliBili 的[功能开关与配置](dashboards/bilibili/README.md#按需开启功能)集中在模块 README。
+看板源安装支持后续更新；直接导入 `.bar` 的实例独立保存凭据，不与源安装实例建立相同的更新关联。
 
 ## 开发
 
-源码位于 `dashboards/<看板>/`。修改后运行 `bun test` 和 `bun run build`，将源码与 `registry/` 构建产物一同提交。发布文件按 SHA-256 命名，保留历史文件供缓存索引使用。
+使用 [Bun](https://bun.sh/)，在仓库根目录运行：
 
-维护约定见 [AGENTS.md](AGENTS.md)。
+```sh
+bun test
+bun run build
+```
 
-[AGPL-3.0-only](LICENSE) · [更新记录](CHANGELOG.md)
+- `dashboards/<模块>/`：唯一业务源码、用户说明与预览。
+- `tests/`：行为测试和隔离数据；真实凭据不得写入测试或仓库。
+- `registry/`：构建索引及按 SHA-256 命名的发布文件。源码与新增产物一起提交，保留历史文件供缓存索引使用。
+
+构建只检查静态产物；原生交互与布局还需在 Metrix.Bar 中验证。维护与发布规则见 [AGENTS.md](AGENTS.md)，详细验证入口见[模块说明](dashboards/bilibili/README.md)。
+
+## 文档与许可
+
+[更新记录](CHANGELOG.md) · [维护约定](AGENTS.md) · [第三方声明](dashboards/bilibili/THIRD_PARTY_NOTICES.md)
+
+项目使用 [AGPL-3.0-only](LICENSE)。

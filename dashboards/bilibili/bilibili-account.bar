@@ -1,8 +1,8 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.12.2" category="social" icon="tv"
+     version="1.13.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
-     refresh="6h" material="solid">
+     refresh="1h" material="solid">
   <permissions>
     <network origin="https://api.bilibili.com" />
     <network origin="https://member.bilibili.com" />
@@ -1247,8 +1247,8 @@ function panel(env) {
     h("Box", { height: 1, width: "100%", linearGradient: { stops: [
       { at: 0, color: "surface" }, { at: 0.2, color: "border" }, { at: 0.8, color: "border" }, { at: 1, color: "surface" }] } }),
     connected ? h("Row", { key: "refresh-cadence", width: "100%", height: 24, gap: 8, alignItems: "center", shrink: 0,
-      label: "自动刷新：整体每 6 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
-      tooltip: ["自动刷新：整体每 6 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
+      label: "自动刷新：整体每 1 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
+      tooltip: ["自动刷新：整体每 1 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
         "账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
         features.videos ? "视频 " + stamp(times.videos) : null,
         features.dynamic ? "动态 " + stamp(times.dynamic) : null,
@@ -1258,7 +1258,7 @@ function panel(env) {
       RefreshButton(now),
       h("Row", { gap: 4, alignItems: "center" },
         note("整体", { fontSize: 11, singleLine: true }),
-        text("6 小时", { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })),
+        text("1 小时", { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })),
       privateEnabled() ? h("Row", { key: "private-cadence", gap: 4, alignItems: "center" },
         note("私信", { fontSize: 11, singleLine: true }),
         text(PRIVATE_RATES[privateRate].label, { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })) : null)
