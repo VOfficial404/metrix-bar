@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.12.0" category="social" icon="tv"
+     version="1.12.1" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -1248,13 +1248,22 @@ function panel(env) {
           h("Loading", { size: 24, label: "读取账户" }), note("正在读取账户…"))),
     h("Box", { height: 1, width: "100%", linearGradient: { stops: [
       { at: 0, color: "surface" }, { at: 0.2, color: "border" }, { at: 0.8, color: "border" }, { at: 1, color: "surface" }] } }),
-    connected ? note("整体每 6 小时" + (privateEnabled() ? " · 私信每 " + PRIVATE_RATES[privateRate].label : ""), { singleLine: true,
-      tooltip: ["账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
+    connected ? h("Row", { key: "refresh-cadence", width: "100%", height: 16, gap: 12, alignItems: "center", shrink: 0,
+      label: "自动刷新：整体每 6 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
+      tooltip: ["自动刷新：整体每 6 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
+        "账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
         features.videos ? "视频 " + stamp(times.videos) : null,
         features.dynamic ? "动态 " + stamp(times.dynamic) : null,
         privateEnabled() ? "私信 " + stamp(times.private) : null,
         privateEnabled() && privateDisplay === "list" ? "会话 " + stamp(times.conversations) : null,
-        notificationsEnabled() ? "通知 " + stamp(times.notifications) : null].filter(Boolean).join(" · ") })
+        notificationsEnabled() ? "通知 " + stamp(times.notifications) : null].filter(Boolean).join("\n") },
+      h("Icon", { svg: REFRESH_ICON, width: 12, height: 12, fontSize: 12, textColor: "textMuted", shrink: 0 }),
+      h("Row", { gap: 4, alignItems: "center" },
+        note("整体", { fontSize: 11, singleLine: true }),
+        text("6 小时", { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })),
+      privateEnabled() ? h("Row", { key: "private-cadence", gap: 4, alignItems: "center" },
+        note("私信", { fontSize: 11, singleLine: true }),
+        text(PRIVATE_RATES[privateRate].label, { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })) : null)
       : note("登录信息保存在本机", { width: "100%" }));
 }
 export default {
