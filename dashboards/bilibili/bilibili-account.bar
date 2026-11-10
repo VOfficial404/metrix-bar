@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.15.0" category="social" icon="tv"
+     version="1.16.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -125,6 +125,12 @@ const launch = url => () => $metrix.openURL(url);
 let credential = "", inputError = "", videoLimit = 5, initialized = false, generation = 0;
 let account = null, followers = null, videos = null, privateMessages = null, notifications = null;
 let followerDaily = null;
+let followerTrend = null, followerChart = { days: 7, metric: "net" }, followerChartError = "";
+const FOLLOWER_METRICS = [
+  { value: "follow", label: "新增关注", color: "success" },
+  { value: "unfollow", label: "取关", color: "danger" },
+  { value: "net", label: "净增", color: "accent" },
+];
 let privateDisplay = "summary", privateLimit = 5, privateCardSize = "normal", conversations = null;
 let times = {}, errors = {}, loading = false, inflight = null, inflightGeneration = -1, refreshController = null;
 let tab = "messages";
@@ -463,6 +469,12 @@ function sync(env) {
   }
   const changedAccount = !initialized || next !== credential;
   const firstSync = !initialized;
+  if (firstSync) {
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem("follower-chart:v1") || "null"); } catch {}
+    followerChart = { days: [7, 14, 30].includes(saved?.days) ? saved.days : 7,
+      metric: FOLLOWER_METRICS.some(item => item.value === saved?.metric) ? saved.metric : "net" };
+  }
   initialized = true;
   generation++;
   refreshController?.abort();
@@ -480,7 +492,8 @@ function sync(env) {
     : /[\s;\r\n]/.test(next) || /^SESSDATA=/i.test(next) ? "只填写 SESSDATA 的值，不要填写整段 Cookie。" : "";
   if (changedAccount) {
     account = followers = videos = privateMessages = notifications = conversations = null;
-    followerDaily = null;
+    followerDaily = followerTrend = null;
+    followerChartError = "";
     dynamics = null;
     dynamicFilterUID = null;
     dynamicFilter = { mode: "all", uids: [] };
@@ -491,11 +504,14 @@ function sync(env) {
     privateAttemptAt = 0;
   }
   if (!features.followers) {
-    followers = followerDaily = null;
+    followers = followerDaily = followerTrend = null;
+    followerChartError = "";
     delete times.followers;
     delete errors.followers;
     delete times.followerDaily;
     delete errors.followerDaily;
+    delete times.followerTrend;
+    delete errors.followerTrend;
   }
   if (!features.videos) {
     videos = null;
@@ -580,6 +596,33 @@ function readFollowerDaily(data) {
   if (!Number.isFinite(parsed) || new Date(parsed).toISOString().slice(0, 10) !== date
       || date > yesterdayDate()) invalid();
   return { follow: data.follow, unfollow: data.unfollow, net: data.follow - data.unfollow, date };
+}
+function readFollowerGraph(data) {
+  if (!Array.isArray(data.tendency) || data.tendency.length > 31) invalid();
+  const days = new Map();
+  for (const row of data.tendency) {
+    if (!row || !count(row.date_key) || row.date_key > Math.floor(Date.now() / 1000) || !count(row.total_inc)) invalid();
+    const day = row.date_key * 1000 + 8 * 3600000;
+    if (day % 86400000 !== 0 || days.has(day)) invalid();
+    if (new Date(day).toISOString().slice(0, 10) > yesterdayDate()) invalid();
+    days.set(day, row.total_inc);
+  }
+  return days;
+}
+async function loadFollowerTrend(session, signal) {
+  const follow = readFollowerGraph(await get(MEMBER, "/x/web/data/v2/fans/stat/graph?type=follow&period=1", session, signal));
+  const unfollow = readFollowerGraph(await get(MEMBER, "/x/web/data/v2/fans/stat/graph?type=unfollow&period=1", session, signal));
+  return [...new Set([...follow.keys(), ...unfollow.keys()])].sort((a, b) => a - b).map(day => ({ day,
+    follow: follow.get(day) ?? null, unfollow: unfollow.get(day) ?? null,
+    net: follow.has(day) && unfollow.has(day) ? follow.get(day) - unfollow.get(day) : null }));
+}
+function saveFollowerChart(next) {
+  if (!features.followers || ![7, 14, 30].includes(next.days) || !FOLLOWER_METRICS.some(item => item.value === next.metric)) return;
+  try { localStorage.setItem("follower-chart:v1", JSON.stringify(next)); }
+  catch { followerChartError = "图表偏好保存失败，请重试。"; $metrix.invalidate(); return; }
+  followerChart = next;
+  followerChartError = "";
+  $metrix.invalidate();
 }
 function readPrivate(data) {
   if (!count(data.follow_unread) || !count(data.unfollow_unread)) invalid();
@@ -828,8 +871,8 @@ async function load(session, limit, version, signal) {
   const next = readAccount(await get(API, "/x/web-interface/nav", session, signal));
   if (version !== generation) return;
   if (account && account.uid !== next.uid) {
-    followers = followerDaily = null;
-    for (const key of ["followers", "followerDaily"]) { delete times[key]; delete errors[key]; }
+    followers = followerDaily = followerTrend = null;
+    for (const key of ["followers", "followerDaily", "followerTrend"]) { delete times[key]; delete errors[key]; }
   }
   account = next;
   times.account = Date.now();
@@ -839,7 +882,8 @@ async function load(session, limit, version, signal) {
   const tasks = [];
   if (features.followers) tasks.push(
     ["followers", () => get(API, "/x/relation/stat?vmid=" + next.uid, session, signal), data => { followers = readFollowers(next.uid, data); }],
-    ["followerDaily", () => get(MEMBER, "/x/web/data/v2/fans/stat/num?period=-1", session, signal), data => { followerDaily = readFollowerDaily(data); }]);
+    ["followerDaily", () => get(MEMBER, "/x/web/data/v2/fans/stat/num?period=-1", session, signal), data => { followerDaily = readFollowerDaily(data); }],
+    ["followerTrend", () => loadFollowerTrend(session, signal), data => { followerTrend = data; }]);
   if (notificationsEnabled()) tasks.push(
     ["notifications", () => get(IM, "/x/im/web/msgfeed/unread?build=0&mobi_app=web", session, signal), data => { notifications = readNotifications(data); }]);
   const results = await Promise.allSettled(tasks.map(async ([key, request, apply]) => {
@@ -954,6 +998,44 @@ function sectionError(key) {
     text(errors[key], { key: "error-" + key, fontSize: 12, textColor: "warning", wrap: true }),
     note(times[key] ? "上次成功：" + stamp(times[key]) : "此项尚无可用数据")) : null;
 }
+function FollowerTrend(now) {
+  const metric = FOLLOWER_METRICS.find(item => item.value === followerChart.metric);
+  const end = Date.parse(yesterdayDate(now) + "T00:00:00Z"), start = end - (followerChart.days - 1) * 86400000;
+  const rows = new Map((followerTrend || []).filter(row => row.day >= start && row.day <= end).map(row => [row.day, row]));
+  const labels = [], series = [];
+  let segment = null, available = 0, min = 0, max = 0;
+  for (let index = 0; index < followerChart.days; index++) {
+    const day = start + index * 86400000, date = new Date(day).toISOString().slice(0, 10);
+    labels.push(date.slice(5).replace("-", "/"));
+    const value = rows.get(day)?.[metric.value];
+    if (value == null) { segment = null; continue; }
+    if (!segment) { segment = { name: metric.label, color: metric.color, points: [] }; series.push(segment); }
+    segment.points.push({ x: index, y: value, label: date, valueLabel: (metric.value === "net" ? signed(value) : comma(value)) + " 人" });
+    available++;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  return h("Column", { key: "follower-trend", gap: 8, padding: 12, radius: 12, background: "surfaceHover", width: "100%", minWidth: 0 },
+    h("Row", { width: "100%", alignItems: "center", gap: 8 },
+      text("粉丝趋势", { fontSize: 13, fontWeight: 500, grow: 1 }),
+      h("Select", { key: "follower-metric", label: "趋势指标", value: metric.value, width: 120,
+        items: FOLLOWER_METRICS.map(({ value, label }) => ({ value, label })),
+        onChange: value => saveFollowerChart({ ...followerChart, metric: value }) })),
+    h("Segmented", { key: "follower-range", label: "趋势时间范围", width: "100%", value: followerChart.days,
+      items: [7, 14, 30].map(days => ({ value: days, label: "近 " + days + " 天" })),
+      onChange: days => saveFollowerChart({ ...followerChart, days }) }),
+    followerChartError ? note(followerChartError, { key: "follower-chart-error", textColor: "warning", wrap: true }) : null,
+    available ? h("Chart", { key: "follower-chart", type: "line", xKind: "category", labels, series,
+      curve: "monotone", height: 150, width: "100%", xTicks: 3, yTicks: 3, xDomain: [0, followerChart.days - 1],
+      yDomain: min === max ? [-1, 1] : [min < 0 ? min - (max - min) * 0.1 : 0, max > 0 ? max + (max - min) * 0.1 : 0],
+      dots: true, legend: false, hover: true, appear: false,
+      referenceLines: [{ value: 0, color: "border" }],
+      label: "近 " + followerChart.days + " 天每日" + metric.label + "，单位：人" })
+      : note(followerTrend === null && loading ? "正在读取粉丝趋势…" : "所选时段暂无可用趋势数据", { key: "follower-trend-empty", paddingY: 24, wrap: true }),
+    note(new Date(start).toISOString().slice(0, 10) + " 至 " + yesterdayDate(now), { key: "follower-trend-period", fontSize: 11 }),
+    available < followerChart.days ? note("已获取 " + available + "/" + followerChart.days + " 天；缺失日期不补零、不连线。",
+      { key: "follower-trend-coverage", fontSize: 11, wrap: true }) : null);
+}
 function Account(now) {
   const daily = followerDaily?.date === yesterdayDate(now) ? followerDaily : null;
   const levelColor = LEVEL_COLORS[Math.min(account.level, 6)];
@@ -986,6 +1068,8 @@ function Account(now) {
         : "昨日统计暂不可用" + (followerDaily ? " · 最近统计 " + followerDaily.date : ""),
         { key: "follower-date", fontSize: 11, wrap: true,
           tooltip: "按北京时间自然日统计；昨日净增 = B 站昨日新增关注 − 昨日取关。服务端更新可能延迟。" })) : null,
+    features.followers ? sectionError("followerTrend") : null,
+    features.followers ? FollowerTrend(now) : null,
     features.level ? h("Column", { gap: 8, padding: 12, radius: 12, background: "surfaceHover", width: "100%" },
       h("Row", { alignItems: "center", gap: 8, width: "100%" },
         text("Lv." + account.level, { key: "level", fontSize: 12, fontWeight: 600, height: 20,
@@ -1244,7 +1328,7 @@ function panel(env) {
   const now = Date.now(), connected = account && login.phase === "idle" && !inputError;
   const width = Math.max(200, Math.min(320, env.viewport?.width || 320)) - 32;
   const compactAccount = tabs.length === 1 && tabs[0].id === "account" && !features.followers;
-  const connectedHeight = tab === "dynamic" ? 440 : tab === "account" && features.followers ? 510 : compactAccount ? (features.level ? 280 : 208) : 400;
+  const connectedHeight = tab === "dynamic" ? 440 : tab === "account" && features.followers ? 800 : compactAccount ? (features.level ? 280 : 208) : 400;
   const contextMenu = [{ label: "重新扫码登录", onClick: () => startLogin() },
     { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") }];
   const identity = account ? `${account.uid}:${account.level}:${account.xp}` : "";
@@ -1276,6 +1360,7 @@ function panel(env) {
       tooltip: ["自动刷新：整体每 " + globalRefreshLabel() + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
         "账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
         features.followers ? "昨日粉丝统计 " + stamp(times.followerDaily) : null,
+        features.followers ? "粉丝趋势 " + stamp(times.followerTrend) : null,
         features.videos ? "视频 " + stamp(times.videos) : null,
         features.dynamic ? "动态 " + stamp(times.dynamic) : null,
         privateEnabled() ? "私信 " + stamp(times.private) : null,

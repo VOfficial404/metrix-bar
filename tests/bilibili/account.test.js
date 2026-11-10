@@ -10,6 +10,7 @@ const qrGeneration = () => JSON.parse(loginFixture.http[0].body);
 const NAV = "/x/web-interface/nav";
 const FANS = "/x/relation/stat";
 const FAN_DAILY = "/x/web/data/v2/fans/stat/num";
+const FAN_GRAPH = "/x/web/data/v2/fans/stat/graph";
 const LIST = "/x/web/archives";
 const VIEW = "/x/web-interface/view";
 const ok = data => ({ code: 0, data });
@@ -226,25 +227,29 @@ describe("Bilibili dashboard behavior", () => {
     expect(w.render().tray.error).toBe("");
   });
 
-  test("disabling followers clears both requests and errors, then reloads server daily counts", async () => {
+  test("disabling followers clears all follower requests and errors, then reloads server counts and trends", async () => {
     let fail = false;
-    const w = worker({ intercept: url => fail && [FANS, FAN_DAILY].includes(url.pathname) ? { code: -352 } : undefined });
+    const w = worker({ intercept: url => fail && [FANS, FAN_DAILY, FAN_GRAPH].includes(url.pathname) ? { code: -352 } : undefined });
     await w.refresh();
     fail = true;
     await w.refresh();
     expect(w.render().tray.error).toContain("风控");
+    expect(find(w.render(), "error-followerTrend")).toBeDefined();
     w.env.inputs.show_followers = false;
     const before = w.requests.length;
     await w.refresh();
-    expect(w.requests.slice(before).some(({ url }) => [FANS, FAN_DAILY].includes(url.pathname))).toBe(false);
+    expect(w.requests.slice(before).some(({ url }) => [FANS, FAN_DAILY, FAN_GRAPH].includes(url.pathname))).toBe(false);
     expect(find(w.render(), "followers")).toBeUndefined();
     expect(find(w.render(), "follower-net")).toBeUndefined();
+    for (const key of ["follower-chart", "follower-range", "follower-metric", "error-followerTrend", "follower-chart-error"])
+      expect(find(w.render(), key)).toBeUndefined();
     expect(w.render().tray.title).not.toContain("粉丝");
     expect(w.render().tray.error).toBe("");
     fail = false;
     w.env.inputs.show_followers = true;
     await w.refresh();
     expect(value(w, "follower-net")).toBe("-11");
+    expect(find(w.render(), "follower-chart")).toBeDefined();
   });
 
   test("visible tab indices stay correct when account modules or the active page are disabled", async () => {
@@ -1816,7 +1821,7 @@ describe("native menu settings", () => {
     expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
     const before = w.requests.length;
     await w.refresh();
-    expect(w.requests.slice(before).map(({ url }) => url.pathname).sort()).toEqual([NAV, FANS, FAN_DAILY].sort());
+    expect(w.requests.slice(before).map(({ url }) => url.pathname).sort()).toEqual([NAV, FANS, FAN_DAILY, FAN_GRAPH, FAN_GRAPH].sort());
     w.env.inputs.show_account = false;
     for (const key of ["uid", "coins", "followers", "level", "navigation"]) expect(find(w.render(), key)).toBeUndefined();
     expect(find(w.render(), "no-features")).toBeDefined();
@@ -2295,5 +2300,300 @@ describe("dynamic feed and author preferences", () => {
     expect(dynamicIDs(w)).toEqual([]);
     w.env.inputs.show_dynamic = true;
     expect(dynamicIDs(w)).toEqual([]);
+  });
+});
+
+const graphRow = (date, total_inc) => ({ date_key: Date.parse(date + "T00:00:00+08:00") / 1000, total_inc });
+const graphPayload = tendency => ok({ tendency });
+const trendChart = w => find(w.render(), "follower-chart")?.props;
+const trendPoints = w => trendChart(w)?.series.flatMap(series => series.points) || [];
+
+describe("follower trend curves", () => {
+  test("7, 14 and 30 day windows show exact calendar boundaries and signed daily values", async () => {
+    const w = worker();
+    await w.refresh();
+    expect(find(w.render(), "follower-range").type).toBe("Segmented");
+    expect(find(w.render(), "follower-range").props.value).toBe(7);
+    expect(find(w.render(), "follower-metric").type).toBe("Select");
+    expect(find(w.render(), "follower-metric").props.value).toBe("net");
+    const expected = [8, 11, -4, 0, 11, 15, -4, 6, 17, 0, 5, 16, -3, 14, 10, 0,
+      -2, 16, 9, -3, 17, 11, -3, 13, 0, 0, 15, -4, 13, -11];
+    for (const [days, start] of [[7, "2026-11-02"], [14, "2026-10-26"], [30, "2026-10-10"]]) {
+      change(w, "follower-range", days);
+      const chart = trendChart(w), points = trendPoints(w);
+      expect(chart).toMatchObject({ type: "line", xKind: "category", xDomain: [0, days - 1] });
+      expect(chart.labels).toHaveLength(days);
+      expect(chart.labels[0]).toBe(start.slice(5).replace("-", "/"));
+      expect(chart.labels.at(-1)).toBe("11/08");
+      expect(chart.series).toHaveLength(1);
+      expect(points.map(point => point.y)).toEqual(expected.slice(-days));
+      expect(points.map(point => point.x)).toEqual(Array.from({ length: days }, (_, index) => index));
+      expect(points[0].label).toBe(start);
+      expect(points.at(-1)).toEqual({ x: days - 1, y: -11, label: "2026-11-08", valueLabel: "-11 人" });
+      expect(value(w, "follower-trend-period")).toBe(start + " 至 2026-11-08");
+      expect(find(w.render(), "follower-trend-coverage")).toBeUndefined();
+    }
+    expect(value(w, "follower-follow")).toBe("7");
+    expect(value(w, "follower-unfollow")).toBe("18");
+    expect(value(w, "follower-net")).toBe("-11");
+    expect(w.render().tray.title).toContain("(昨日 -11)");
+  });
+
+  test("changing metrics and ranges uses the fetched pair without requests", async () => {
+    const w = worker();
+    await w.refresh();
+    const before = w.requests.length;
+    for (const [metric, values, last] of [
+      ["follow", [21, 14, 0, 28, 11, 19, 7], "7 人"],
+      ["unfollow", [8, 14, 0, 13, 15, 6, 18], "18 人"],
+      ["net", [13, 0, 0, 15, -4, 13, -11], "-11 人"],
+    ]) {
+      change(w, "follower-metric", metric);
+      expect(trendPoints(w).map(point => point.y)).toEqual(values);
+      expect(trendPoints(w).at(-1).valueLabel).toBe(last);
+      change(w, "follower-range", 30);
+      expect(trendPoints(w)).toHaveLength(30);
+      change(w, "follower-range", 7);
+    }
+    expect(w.requests).toHaveLength(before);
+    const requests = w.requests.filter(({ url }) => url.pathname === FAN_GRAPH);
+    expect(requests.map(({ url }) => url.href)).toEqual([
+      "https://member.bilibili.com" + FAN_GRAPH + "?type=follow&period=1",
+      "https://member.bilibili.com" + FAN_GRAPH + "?type=unfollow&period=1",
+    ]);
+    expect(w.requests[0].url.pathname).toBe(NAV);
+    expect(requests[0].options.signal).toBe(requests[1].options.signal);
+    for (const { options } of requests) {
+      expect(options.method || "GET").toBe("GET");
+      expect(options.headers.Cookie).toBe("SESSDATA=fixture-session");
+    }
+  });
+
+  test("only preferences persist across restart and saved choices are validated", async () => {
+    const w = worker();
+    await w.refresh();
+    change(w, "follower-range", 14);
+    change(w, "follower-metric", "unfollow");
+    expect(JSON.parse(w.store.get("follower-chart:v1"))).toEqual({ days: 14, metric: "unfollow" });
+    expect(w.storageWrites.filter(({ key }) => key.startsWith("follower"))).toEqual([
+      { key: "follower-chart:v1", value: JSON.stringify({ days: 14, metric: "net" }) },
+      { key: "follower-chart:v1", value: JSON.stringify({ days: 14, metric: "unfollow" }) },
+    ]);
+    const restarted = worker({ store: w.store, intercept: url => url.pathname === FAN_GRAPH ? { code: -352 } : undefined });
+    await restarted.refresh();
+    expect(find(restarted.render(), "follower-range").props.value).toBe(14);
+    expect(find(restarted.render(), "follower-metric").props.value).toBe("unfollow");
+    expect(trendChart(restarted)).toBeUndefined();
+    expect(find(restarted.render(), "follower-trend-empty")).toBeDefined();
+    for (const [saved, days, metric] of [
+      ["invalid json", 7, "net"], ["null", 7, "net"],
+      [JSON.stringify({ days: "30", metric: "follow" }), 7, "follow"],
+      [JSON.stringify({ days: 30, metric: "unknown" }), 30, "net"],
+      [JSON.stringify({ days: 8, metric: null }), 7, "net"],
+    ]) {
+      const restored = worker({ store: new Map([["follower-chart:v1", saved]]) });
+      await restored.refresh();
+      expect(find(restored.render(), "follower-range").props.value).toBe(days);
+      expect(find(restored.render(), "follower-metric").props.value).toBe(metric);
+    }
+  });
+
+  test("failed preference writes preserve both controls and the displayed curve until a successful retry", async () => {
+    const store = new Map(), w = worker({ store });
+    await w.refresh();
+    change(w, "follower-range", 14);
+    change(w, "follower-metric", "follow");
+    const original = JSON.stringify(trendChart(w)), persisted = store.get("follower-chart:v1"), requests = w.requests.length;
+    store.set = () => { throw new Error("synthetic-storage-secret"); };
+    for (const [key, next] of [["follower-range", 30], ["follower-metric", "unfollow"]]) {
+      change(w, key, next);
+      expect(find(w.render(), "follower-range").props.value).toBe(14);
+      expect(find(w.render(), "follower-metric").props.value).toBe("follow");
+      expect(JSON.stringify(trendChart(w))).toBe(original);
+      expect(store.get("follower-chart:v1")).toBe(persisted);
+      expect(find(w.render(), "follower-chart-error")).toBeDefined();
+      expect(JSON.stringify(w.render())).not.toContain("synthetic-storage-secret");
+    }
+    store.set = Map.prototype.set;
+    change(w, "follower-range", 30);
+    expect(find(w.render(), "follower-chart-error")).toBeUndefined();
+    expect(trendPoints(w)).toHaveLength(30);
+    expect(w.requests).toHaveLength(requests);
+  });
+
+  test("unordered dates join by day and missing dates split curves instead of manufacturing zero net", async () => {
+    const follow = [graphRow("2026-11-08", 7), graphRow("2026-11-03", 0), graphRow("2026-11-02", 12),
+      graphRow("2026-11-06", 9), graphRow("2026-11-07", 2)];
+    const unfollow = [graphRow("2026-11-07", 5), graphRow("2026-11-02", 3), graphRow("2026-11-05", 8),
+      graphRow("2026-11-08", 18), graphRow("2026-11-03", 0)];
+    const w = worker({ intercept: url => url.pathname === FAN_GRAPH
+      ? graphPayload(url.searchParams.get("type") === "follow" ? follow : unfollow) : undefined });
+    await w.refresh();
+    expect(trendChart(w).labels).toEqual(["11/02", "11/03", "11/04", "11/05", "11/06", "11/07", "11/08"]);
+    expect(trendChart(w).series.map(series => series.points.map(({ x, y }) => [x, y])))
+      .toEqual([[[0, 9], [1, 0]], [[5, -3], [6, -11]]]);
+    expect(value(w, "follower-trend-coverage")).toContain("4/7");
+    change(w, "follower-metric", "follow");
+    expect(trendChart(w).series.map(series => series.points.map(({ x, y }) => [x, y])))
+      .toEqual([[[0, 12], [1, 0]], [[4, 9], [5, 2], [6, 7]]]);
+    change(w, "follower-metric", "unfollow");
+    expect(trendChart(w).series.map(series => series.points.map(({ x, y }) => [x, y])))
+      .toEqual([[[0, 3], [1, 0]], [[3, 8]], [[5, 5], [6, 18]]]);
+    expect(value(w, "follower-trend-coverage")).toContain("5/7");
+  });
+
+  test("empty arrays and zero counts are valid, while absent halves never become net values", async () => {
+    for (const metric of ["follow", "unfollow", "both"]) {
+      const w = worker({ intercept: url => url.pathname === FAN_GRAPH
+        ? graphPayload(metric === "both" || url.searchParams.get("type") === metric ? [] : [graphRow("2026-11-08", 0)]) : undefined });
+      await w.refresh();
+      expect(trendChart(w)).toBeUndefined();
+      expect(find(w.render(), "follower-trend-empty")).toBeDefined();
+      expect(find(w.render(), "error-followerTrend")).toBeUndefined();
+      expect(value(w, "follower-trend-coverage")).toContain("0/7");
+      if (metric !== "both") {
+        change(w, "follower-metric", metric === "follow" ? "unfollow" : "follow");
+        expect(trendPoints(w)).toEqual([{ x: 6, y: 0, label: "2026-11-08", valueLabel: "0 人" }]);
+      }
+    }
+    const zero = worker({ intercept: url => url.pathname === FAN_GRAPH ? graphPayload([graphRow("2026-11-08", 0)]) : undefined });
+    await zero.refresh();
+    expect(trendPoints(zero)).toEqual([{ x: 6, y: 0, label: "2026-11-08", valueLabel: "0 人" }]);
+    expect(find(zero.render(), "error-followerTrend")).toBeUndefined();
+  });
+
+  test("malformed graph shapes, dates, duplicate days and counts fail without substituting daily statistics", async () => {
+    const valid = graphRow("2026-11-08", 7);
+    const invalid = [null, {}, "[]", [null],
+      ...[null, "1794067200", NaN, Infinity, -1, 0, valid.date_key + 0.5, valid.date_key + 1,
+        Date.parse("2026-11-08T00:00:00Z") / 1000, graphRow("2026-11-09", 1).date_key,
+        graphRow("2026-11-10", 1).date_key, Number.MAX_SAFE_INTEGER].map(date_key => [{ ...valid, date_key }]),
+      ...[undefined, null, "7", -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1].map(total_inc => [{ ...valid, total_inc }]),
+      [valid, { ...valid, total_inc: 8 }],
+      Array.from({ length: 32 }, (_, index) => ({ date_key: valid.date_key - index * 86400, total_inc: index })),
+    ];
+    for (const bad of invalid) {
+      const w = worker({ intercept: url => url.pathname === FAN_GRAPH ? graphPayload(bad) : undefined });
+      await w.refresh();
+      expect(trendChart(w)).toBeUndefined();
+      expect(value(w, "error-followerTrend")).toContain("数据结构");
+      expect(value(w, "follower-net")).toBe("-11");
+      expect(value(w, "followers")).toBe("1,200");
+    }
+  });
+
+  test("the graph pair is sequential and publishes only after both halves succeed", async () => {
+    let hold = false, release, entered;
+    const started = new Promise(resolve => { entered = resolve; });
+    const pending = new Promise(resolve => { release = resolve; });
+    const w = worker({ intercept: async url => {
+      if (!hold || url.pathname !== FAN_GRAPH) return;
+      if (url.searchParams.get("type") === "follow") { entered(); await pending; return graphPayload([graphRow("2026-11-08", 40)]); }
+      return graphPayload([graphRow("2026-11-08", 10)]);
+    } });
+    await w.refresh();
+    const original = JSON.stringify(trendChart(w)), before = w.requests.length;
+    hold = true;
+    const refresh = w.refresh();
+    await started;
+    expect(w.requests.slice(before).filter(({ url }) => url.pathname === FAN_GRAPH).map(({ url }) => url.searchParams.get("type"))).toEqual(["follow"]);
+    expect(JSON.stringify(trendChart(w))).toBe(original);
+    release();
+    await refresh;
+    expect(trendPoints(w)).toEqual([{ x: 6, y: 30, label: "2026-11-08", valueLabel: "+30 人" }]);
+  });
+
+  test("a failed graph half retains the previous pair independently of yesterday's summary and recovers atomically", async () => {
+    for (const failedMetric of ["follow", "unfollow"]) {
+      let phase = "initial";
+      const w = worker({ intercept: url => {
+        if (phase === "initial") return;
+        if (url.pathname === FAN_DAILY) return phase === "failed" ? ok({ follow: 90, unfollow: 3, log_date: 20261108 }) : { code: -352 };
+        if (url.pathname === FAN_GRAPH) {
+          const metric = url.searchParams.get("type");
+          if (phase === "failed" && metric === failedMetric) return { code: -352, message: "synthetic-remote-trend-secret" };
+          return graphPayload([graphRow("2026-11-08", metric === "follow" ? 40 : 10)]);
+        }
+      } });
+      await w.refresh();
+      const original = JSON.stringify(trendChart(w));
+      phase = "failed";
+      await w.refresh();
+      expect(JSON.stringify(trendChart(w))).toBe(original);
+      expect(value(w, "error-followerTrend")).toContain("风控");
+      expect(value(w, "follower-net")).toBe("+87");
+      expect(JSON.stringify(w.render())).not.toContain("synthetic-remote-trend-secret");
+      phase = "recovered";
+      await w.refresh();
+      expect(trendPoints(w).map(point => point.y)).toEqual([30]);
+      expect(find(w.render(), "error-followerTrend")).toBeUndefined();
+      expect(value(w, "error-followerDaily")).toContain("风控");
+      expect(value(w, "follower-net")).toBe("+87");
+    }
+  });
+
+  test("render rolls the requested window at Beijing midnight without moving old data into yesterday", async () => {
+    const w = worker();
+    w.clock.now = Date.parse("2026-11-09T15:59:59Z");
+    await w.refresh();
+    const before = w.requests.length;
+    expect(value(w, "follower-trend-period")).toBe("2026-11-02 至 2026-11-08");
+    w.clock.now += 1000;
+    expect(value(w, "follower-trend-period")).toBe("2026-11-03 至 2026-11-09");
+    expect(trendChart(w).labels).toEqual(["11/03", "11/04", "11/05", "11/06", "11/07", "11/08", "11/09"]);
+    expect(trendPoints(w).map(point => point.y)).toEqual([0, 0, 15, -4, 13, -11]);
+    expect(trendPoints(w).at(-1)).toMatchObject({ x: 5, label: "2026-11-08", y: -11 });
+    expect(value(w, "follower-trend-coverage")).toContain("6/7");
+    expect(w.requests).toHaveLength(before);
+    await w.refresh();
+    expect(trendPoints(w).some(point => point.label === "2026-11-09")).toBe(false);
+  });
+
+  test("late graph successes and errors cannot cross credentials, feature disable or worker stop", async () => {
+    for (const pendingMetric of ["follow", "unfollow"]) {
+      for (const action of ["credentials", "show_followers", "show_account", "stop"]) {
+        for (const failure of [false, true]) {
+          let hold = false, release, entered, signal;
+          const started = new Promise(resolve => { entered = resolve; });
+          const pending = new Promise(resolve => { release = resolve; });
+          const w = worker({ intercept: async (url, options) => {
+            const second = options.headers.Cookie === "SESSDATA=second-session";
+            if (second && url.pathname === NAV) return nav(67890);
+            if (second && url.pathname === FANS) return ok({ mid: 67890, follower: 7, following: 1 });
+            if (second && url.pathname === LIST) return ok({ arc_audits: [], page: { pn: 1, ps: 30, count: 0 } });
+            if (url.pathname !== FAN_GRAPH || !hold) return;
+            if (second) return graphPayload([]);
+            if (url.searchParams.get("type") === pendingMetric) { signal = options.signal; entered(); return await pending; }
+            return graphPayload([graphRow("2026-11-08", 999)]);
+          } });
+          await w.refresh();
+          hold = true;
+          const first = w.refresh();
+          await started;
+          if (action === "credentials") w.state.secret = "second-session";
+          else if (action === "stop") await w.event("lifecycle", { type: "stop" });
+          else w.env.inputs[action] = false;
+          w.render();
+          expect(signal.aborted).toBe(true);
+          const stoppedChart = JSON.stringify(trendChart(w));
+          const second = action === "stop" ? Promise.resolve() : w.refresh();
+          release(failure ? { code: -352 } : graphPayload([graphRow("2026-11-08", 999)]));
+          await Promise.all([first, second]);
+          expect(find(w.render(), "error-followerTrend")).toBeUndefined();
+          expect(trendPoints(w).some(point => Math.abs(point.y) === 999)).toBe(false);
+          if (action === "stop") expect(JSON.stringify(trendChart(w))).toBe(stoppedChart);
+          else {
+            expect(trendChart(w)).toBeUndefined();
+            if (action === "credentials") expect(value(w, "uid")).toBe("UID 67890");
+            else {
+              w.env.inputs[action] = true;
+              w.render();
+              expect(trendChart(w)).toBeUndefined();
+              expect(find(w.render(), "follower-trend-empty")).toBeDefined();
+            }
+          }
+        }
+      }
+    }
   });
 });
