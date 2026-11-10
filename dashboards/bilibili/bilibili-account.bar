@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.14.1" category="social" icon="tv"
+     version="1.14.2" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -1035,10 +1035,10 @@ function DynamicFilters() {
         onChange: value => { dynamicUIDDraft = String(value); }, onSubmit: addDynamicUser }),
       h("Button", { key: "dynamic-user-add-button", text: "添加", onClick: addDynamicUser })),
     dynamicFilterError ? note(dynamicFilterError, { textColor: "warning", wrap: true }) : null,
-    h("Scroll", { maxHeight: 150, width: "100%" }, h("Column", { gap: 6, width: "100%", paddingRight: 12 },
+    h("Column", { gap: 8, width: "100%", minWidth: 0 },
       candidates.map(author => h("Checkbox", { key: "dynamic-user-" + author.uid, label: author.name + " · " + author.uid,
         value: dynamicFilter.uids.includes(author.uid), onChange: selected => selectDynamicUser(author.uid, selected === true) })),
-      !candidates.length ? note("没有匹配用户，可直接添加 UID。", { wrap: true }) : null)),
+      !candidates.length ? note("没有匹配用户，可直接添加 UID。", { wrap: true }) : null),
     h("Button", { key: "dynamic-filter-clear", text: "清空已选用户", disabled: !dynamicFilter.uids.length,
       onClick: () => saveDynamicFilter({ ...dynamicFilter, uids: [] }) }));
 }
@@ -1049,42 +1049,43 @@ function Dynamics() {
   const summary = (dynamicFilter.mode === "all" ? "全部用户" : dynamicFilter.mode === "include" ? "只看选中用户" : "屏蔽选中用户")
     + (dynamicFilter.mode === "all" ? "" : " · " + selected.size + " 位");
   return h("Column", { gap: 8, width: "100%", height: "100%", minWidth: 0, minHeight: 0 },
-    h("Row", { width: "100%", alignItems: "center", gap: 8, shrink: 0 },
+    h("Row", { width: "100%", paddingX: 12, alignItems: "center", gap: 8, shrink: 0 },
       text(dynamicFilterOpen ? "筛选用户" : summary, { key: "dynamic-filter-summary", fontSize: 12,
         textColor: "textMuted", grow: 1, minWidth: 0, singleLine: true }),
-      h("ButtonBase", { key: "dynamic-filter-toggle", height: 28, paddingX: 10, paddingY: 0, radius: 14,
+      h("ButtonBase", { key: "dynamic-filter-toggle", height: 28, paddingX: 10, paddingY: 0, radius: 8,
         background: "surfaceHover", hover: { background: "surfacePressed" }, focusRing: true, shrink: 0,
         label: dynamicFilterOpen ? "返回动态" : "筛选用户", ...pressStyle(),
         onClick: () => { dynamicFilterOpen = !dynamicFilterOpen; $metrix.invalidate(); } },
         text(dynamicFilterOpen ? "返回动态" : "筛选", { fontSize: 12 }))),
     dynamicFilterOpen
       ? h("Scroll", { key: "dynamic-filter-scroll", width: "100%", grow: 1, minHeight: 0 },
-        h("Column", { width: "100%", paddingRight: 16 }, DynamicFilters()))
+        h("Column", { width: "100%", minWidth: 0, paddingX: 12, paddingY: 4 }, DynamicFilters()))
       : h("Scroll", { key: "scroll-dynamic", width: "100%", grow: 1, minHeight: 0 },
-        h("Column", { gap: 0, width: "100%", minWidth: 0, paddingRight: 16 },
+        h("Column", { gap: 0, width: "100%", minWidth: 0, paddingX: 12 },
           sectionError("dynamic"),
           dynamics === null ? note(dynamicInflight || loading ? "正在读取动态…" : "动态尚不可用，请刷新。", { wrap: true, paddingY: 16 })
             : !items.length ? note(dynamicFilter.mode === "include" && !selected.size ? "请选择要查看的用户。"
               : dynamics.items.length ? "已加载动态中没有匹配内容，可调整筛选或加载更多。" : "暂无可显示的动态。",
               { key: "dynamic-empty", wrap: true, paddingY: 16 }) : null,
           items.map((item, index) => h("Column", { key: "dynamic-row-" + item.id, gap: 0, width: "100%", minWidth: 0 },
-            h("ButtonBase", { key: "dynamic-item-" + item.id, width: "100%", minWidth: 0, paddingX: 0, paddingY: 10, radius: 8,
+            h("ButtonBase", { key: "dynamic-item-" + item.id, width: "100%", minWidth: 0, paddingX: 0, paddingY: 12, radius: 8,
               hover: { background: "surfaceHover" }, focusRing: true, ...pressStyle(),
               label: item.name + "的动态，打开原文", onClick: launch("https://t.bilibili.com/" + item.id) },
-              h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "start" },
-                h("Avatar", { name: item.name, ...(item.avatar ? { src: item.avatar } : {}), width: 24, height: 24, radius: 12, shrink: 0 }),
-                h("Column", { gap: 5, grow: 1, minWidth: 0 },
-                  h("Row", { gap: 6, width: "100%", minWidth: 0, alignItems: "center" },
-                    text(item.name, { fontSize: 12, fontWeight: 500, grow: 1, minWidth: 0, singleLine: true,
-                      tooltip: item.name + " · UID " + item.uid }),
-                    note(stamp(item.at), { fontSize: 10, singleLine: true, shrink: 0 })),
-                  text(item.text, { key: "dynamic-text-" + item.id, fontSize: 13, wrap: true, maxLines: 3, width: "100%", minWidth: 0 })))),
+              h("Column", { gap: 8, width: "100%", minWidth: 0 },
+                h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "center" },
+                  h("Avatar", { name: item.name, ...(item.avatar ? { src: item.avatar } : {}), width: 24, height: 24, radius: 12, shrink: 0 }),
+                  text(item.name, { fontSize: 12, fontWeight: 500, grow: 1, minWidth: 0, singleLine: true,
+                    tooltip: item.name + " · UID " + item.uid }),
+                  note(stamp(item.at), { fontSize: 10, singleLine: true, shrink: 0 })),
+                text(item.text, { key: "dynamic-text-" + item.id, fontSize: 13, wrap: true, maxLines: 3, width: "100%", minWidth: 0 }))),
             index < items.length - 1 ? h("Box", { height: 1, width: "100%", background: "border" }) : null)))),
-    !dynamicFilterOpen && dynamics ? h("Row", { width: "100%", gap: 8, alignItems: "center", shrink: 0 },
+    !dynamicFilterOpen && dynamics ? h("Row", { width: "100%", paddingX: 12, gap: 8, alignItems: "center", shrink: 0 },
       note("已加载 " + dynamics.items.length + " 条 · 显示 " + items.length + " 条", { key: "dynamic-count", fontSize: 11, grow: 1, minWidth: 0 }),
-      dynamics.hasMore && dynamics.items.length < 100 ? h("Button", { key: "dynamic-more", text: dynamicInflight ? "加载中…" : "加载更多",
-        disabled: !!dynamicInflight || loading, onClick: () => refreshDynamics(true) }) : null) : null,
-    !dynamicFilterOpen && dynamics?.items.length >= 100 ? note("已加载 100 条，刷新可查看最新动态。", { wrap: true, shrink: 0 }) : null);
+      dynamics.hasMore && dynamics.items.length < 100 ? h("ButtonBase", { key: "dynamic-more", height: 28, paddingX: 10,
+        radius: 8, background: "surfaceHover", hover: { background: "surfacePressed" }, focusRing: true, shrink: 0, ...pressStyle(),
+        label: dynamicInflight ? "加载中…" : "加载更多", disabled: !!dynamicInflight || loading, onClick: () => refreshDynamics(true) },
+        text(dynamicInflight ? "加载中…" : "加载更多", { fontSize: 12 })) : null) : null,
+    !dynamicFilterOpen && dynamics?.items.length >= 100 ? note("已加载 100 条，刷新可查看最新动态。", { paddingX: 12, wrap: true, shrink: 0 }) : null);
 }
 function ConversationList() {
   const dense = privateCardSize === "compact";
