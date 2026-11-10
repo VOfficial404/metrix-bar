@@ -1575,6 +1575,12 @@ function openDynamicFilter(w) {
   w.select("dynamic");
   w.click("dynamic-filter-toggle");
 }
+function filteredDynamicIDs(w) {
+  w.click("dynamic-filter-toggle");
+  const ids = dynamicIDs(w);
+  w.click("dynamic-filter-toggle");
+  return ids;
+}
 
 describe("native menu settings", () => {
   test("native order changes retain the active page and saved inputs select the first page after restart", async () => {
@@ -1751,19 +1757,21 @@ describe("dynamic feed and author preferences", () => {
     const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
     await w.refresh();
     openDynamicFilter(w);
+    expect(dynamicIDs(w)).toEqual([]);
+    expect(find(w.render(), "dynamic-more")).toBeUndefined();
     const before = w.requests.length;
     change(w, "dynamic-filter-mode", "include");
-    expect(dynamicIDs(w)).toEqual([]);
+    expect(filteredDynamicIDs(w)).toEqual([]);
     change(w, "dynamic-user-" + "71001", true);
-    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0]]);
+    expect(filteredDynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0]]);
     change(w, "dynamic-filter-mode", "exclude");
-    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[1]]);
+    expect(filteredDynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[1]]);
     w.click("dynamic-filter-clear");
-    expect(dynamicIDs(w)).toHaveLength(2);
+    expect(filteredDynamicIDs(w)).toHaveLength(2);
     change(w, "dynamic-filter-mode", "include");
-    expect(dynamicIDs(w)).toEqual([]);
+    expect(filteredDynamicIDs(w)).toEqual([]);
     change(w, "dynamic-filter-mode", "all");
-    expect(dynamicIDs(w)).toHaveLength(2);
+    expect(filteredDynamicIDs(w)).toHaveLength(2);
     expect(w.requests).toHaveLength(before);
     expect(JSON.parse(w.store.get("dynamic-filter:v1:12345"))).toEqual({ mode: "all", uids: [] });
   });
@@ -1819,7 +1827,7 @@ describe("dynamic feed and author preferences", () => {
     expect(find(w.render(), "dynamic-filter-mode").props.value).toBe("all");
     expect(find(w.render(), "dynamic-author-search").props.value).toBe("");
     expect(find(w.render(), "dynamic-user-add").props.value).toBe("");
-    expect(dynamicIDs(w)).toHaveLength(2);
+    expect(filteredDynamicIDs(w)).toHaveLength(2);
     change(w, "dynamic-filter-mode", "exclude");
     change(w, "dynamic-user-" + "71002", true);
     expect(store.get("dynamic-filter:v1:12345")).toBe(original);
@@ -1830,7 +1838,7 @@ describe("dynamic feed and author preferences", () => {
     await restarted.refresh();
     openDynamicFilter(restarted);
     expect(find(restarted.render(), "dynamic-filter-mode").props.value).toBe("include");
-    expect(dynamicIDs(restarted)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0]]);
+    expect(filteredDynamicIDs(restarted)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0]]);
   });
 
   test("dynamic content, author names, images and drafts never enter persistent storage", async () => {
@@ -1859,7 +1867,7 @@ describe("dynamic feed and author preferences", () => {
     store.set = () => { throw new Error("synthetic-storage-secret"); };
     change(w, "dynamic-filter-mode", "include");
     expect(find(w.render(), "dynamic-filter-mode").props.value).toBe("all");
-    expect(dynamicIDs(w)).toHaveLength(2);
+    expect(filteredDynamicIDs(w)).toHaveLength(2);
     expect(JSON.stringify(w.render())).not.toBe(before);
     expect(JSON.stringify(w.render())).not.toContain("synthetic-storage-secret");
     expect(store.has("dynamic-filter:v1:12345")).toBe(false);
@@ -1921,6 +1929,7 @@ describe("dynamic feed and author preferences", () => {
     change(w, "dynamic-filter-mode", "include");
     change(w, "dynamic-user-add", "71002");
     w.click("dynamic-user-add-button");
+    w.click("dynamic-filter-toggle");
     expect(dynamicIDs(w)).toEqual([]);
     let release;
     const pending = new Promise(resolve => { release = resolve; });
@@ -1934,6 +1943,7 @@ describe("dynamic feed and author preferences", () => {
     await Promise.all([first, second]);
     await w.flush();
     expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[1]]);
+    openDynamicFilter(w);
     expect(find(w.render(), "dynamic-user-" + "71002")).toBeDefined();
   });
 

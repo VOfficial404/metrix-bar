@@ -70,6 +70,12 @@
         "target": {
           "key": "dynamic-user-71002"
         }
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409931"
+        },
+        "absent": true
       }
     ]
   },
@@ -85,15 +91,11 @@
     "expect": [
       {
         "target": {
-          "key": "dynamic-item-90071992547409931"
+          "key": "dynamic-filter-mode"
         },
-        "absent": true
-      },
-      {
-        "target": {
-          "key": "dynamic-item-90071992547409932"
-        },
-        "absent": true
+        "props": {
+          "value": "include"
+        }
       }
     ]
   },
@@ -106,6 +108,23 @@
     "args": [
       true
     ],
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-user-71001"
+        },
+        "props": {
+          "value": true
+        }
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-filter-toggle"
+    },
+    "handler": "onClick",
     "expect": [
       {
         "target": {
@@ -148,12 +167,36 @@
   {
     "action": "invoke",
     "target": {
+      "key": "dynamic-filter-toggle"
+    },
+    "handler": "onClick"
+  },
+  {
+    "action": "invoke",
+    "target": {
       "key": "dynamic-filter-mode"
     },
     "handler": "onChange",
     "args": [
       "exclude"
     ],
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-filter-mode"
+        },
+        "props": {
+          "value": "exclude"
+        }
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-filter-toggle"
+    },
+    "handler": "onClick",
     "expect": [
       {
         "target": {
@@ -177,7 +220,31 @@
   {
     "action": "invoke",
     "target": {
+      "key": "dynamic-filter-toggle"
+    },
+    "handler": "onClick"
+  },
+  {
+    "action": "invoke",
+    "target": {
       "key": "dynamic-filter-clear"
+    },
+    "handler": "onClick",
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-user-71001"
+        },
+        "props": {
+          "value": false
+        }
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-filter-toggle"
     },
     "handler": "onClick",
     "expect": [

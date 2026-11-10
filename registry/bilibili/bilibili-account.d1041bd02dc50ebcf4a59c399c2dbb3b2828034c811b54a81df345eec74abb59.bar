@@ -1,0 +1,1273 @@
+<bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
+     version="1.11.0" category="social" icon="tv"
+     description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
+     license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
+     refresh="6h" material="solid">
+  <permissions>
+    <network origin="https://api.bilibili.com" />
+    <network origin="https://member.bilibili.com" />
+    <network origin="https://api.vc.bilibili.com" />
+    <network origin="https://passport.bilibili.com" />
+    <network origin="https://i0.hdslb.com" />
+    <network origin="https://i1.hdslb.com" />
+    <network origin="https://i2.hdslb.com" />
+  </permissions>
+  <inputs>
+    <input name="order_messages" type="integer" label="排序 · 消息" default="10" help="数字越小越靠前；相同时按消息、动态、视频、账户排列。" />
+    <input name="order_dynamic" type="integer" label="排序 · 动态" default="20" />
+    <input name="order_videos" type="integer" label="排序 · 视频" default="30" />
+    <input name="order_account" type="integer" label="排序 · 账户" default="40" />
+    <input name="show_account" type="bool" label="账户 · 启用账户页" default="true" help="关闭账户页及托盘粉丝统计，保留下面的细分选择。" />
+    <input name="show_identity" type="bool" label="账户 · UID 与硬币" default="true" />
+    <input name="show_followers" type="bool" label="账户 · 粉丝与关注" default="true" />
+    <input name="show_level" type="bool" label="账户 · 等级与经验" default="true" />
+    <input name="show_videos" type="bool" label="视频 · 启用视频页" default="true" />
+    <input name="video_count" type="select" label="视频 · 最近投稿数量" default="5">
+      <option value="3" label="3 条" />
+      <option value="5" label="5 条" />
+      <option value="10" label="10 条" />
+    </input>
+    <input name="show_video_cover" type="bool" label="视频 · 封面" default="true" />
+    <input name="show_video_date" type="bool" label="视频 · 发布时间" default="true" />
+    <input name="show_video_views" type="bool" label="视频 · 播放量" default="true" />
+    <input name="show_video_likes" type="bool" label="视频 · 点赞数" default="true" />
+    <input name="show_video_favorites" type="bool" label="视频 · 收藏数" default="true" />
+    <input name="show_video_coins" type="bool" label="视频 · 投币数" default="true" />
+    <input name="show_video_comments" type="bool" label="视频 · 评论数" default="true" />
+    <input name="show_messages" type="bool" label="消息 · 启用消息页" default="true" />
+    <input name="show_message_private" type="bool" label="消息 · 未读私信" default="true" />
+    <input name="private_display" type="select" label="消息 · 私信展示方式" default="summary">
+      <option value="summary" label="统计卡片" />
+      <option value="list" label="会话列表" />
+    </input>
+    <input name="private_count" type="select" label="消息 · 最近会话数量" default="5">
+      <option value="3" label="3 条" />
+      <option value="5" label="5 条" />
+      <option value="10" label="10 条" />
+    </input>
+    <input name="private_card_size" type="select" label="消息 · 会话卡片尺寸" default="normal">
+      <option value="compact" label="紧凑" />
+      <option value="normal" label="正常" />
+    </input>
+    <input name="private_refresh" type="select" label="消息 · 私信刷新频率" default="10m">
+      <option value="5m" label="5 分钟" />
+      <option value="10m" label="10 分钟" />
+      <option value="30m" label="30 分钟" />
+      <option value="1h" label="1 小时" />
+      <option value="6h" label="6 小时" />
+    </input>
+    <input name="show_message_likes" type="bool" label="消息 · 收到的赞" default="true" />
+    <input name="show_message_replies" type="bool" label="消息 · 回复我的" default="true" />
+    <input name="show_message_mentions" type="bool" label="消息 · @ 我的" default="true" />
+    <input name="show_message_system" type="bool" label="消息 · 系统通知" default="true" />
+    <input name="show_message_assistant" type="bool" label="消息 · UP 主助手" default="true" />
+    <input name="show_dynamic" type="bool" label="动态 · 启用动态页" default="true" />
+    <input name="sessdata" type="secret" label="高级 · SESSDATA（可选）"
+           help="默认使用看板内扫码登录。" />
+  </inputs>
+  <docs><![CDATA[打开看板扫码登录，在设置中选择需要的功能。详细说明：https://github.com/VOfficial404/metrix-bar/tree/main/dashboards/bilibili#readme]]></docs>
+  <script apis="localStorage shell auth match-media"><![CDATA[
+// SPDX-License-Identifier: AGPL-3.0-only
+// UI composition references Metrix.Bar's official github-repo.bar (AGPL-3.0-only).
+// Self-contained encoding and read-only Bilibili requests; never acknowledge messages.
+// Locally bundled QR encoder; no login URL is sent to an image service.
+/*
+qrcode-generator 1.4.4
+Copyright (c) 2009 Kazuhiko Arase
+https://github.com/kazuhikoarase/qrcode-generator
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+Source: https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js
+SHA-256: 164fc2c1c9eaf0a03aa8dfdb855e82e41a5c6922fbad8bb3238116207e26bef7
+*/
+const createQRCode = (() => {
+var qrcode=function(){function i(t,r){function a(t,r){g=function(t){for(var r=new Array(t),e=0;e<t;e+=1){r[e]=new Array(t);for(var n=0;n<t;n+=1)r[e][n]=null}return r}(l=4*u+17),e(0,0),e(l-7,0),e(0,l-7),i(),o(),v(t,r),7<=u&&h(t),null==n&&(n=w(u,f,c)),d(n,r)}var u=t,f=y[r],g=null,l=0,n=null,c=[],s={},e=function(t,r){for(var e=-1;e<=7;e+=1)if(!(t+e<=-1||l<=t+e))for(var n=-1;n<=7;n+=1)r+n<=-1||l<=r+n||(g[t+e][r+n]=0<=e&&e<=6&&(0==n||6==n)||0<=n&&n<=6&&(0==e||6==e)||2<=e&&e<=4&&2<=n&&n<=4)},o=function(){for(var t=8;t<l-8;t+=1)null==g[t][6]&&(g[t][6]=t%2==0);for(var r=8;r<l-8;r+=1)null==g[6][r]&&(g[6][r]=r%2==0)},i=function(){for(var t=B.getPatternPosition(u),r=0;r<t.length;r+=1)for(var e=0;e<t.length;e+=1){var n=t[r],o=t[e];if(null==g[n][o])for(var i=-2;i<=2;i+=1)for(var a=-2;a<=2;a+=1)g[n+i][o+a]=-2==i||2==i||-2==a||2==a||0==i&&0==a}},h=function(t){for(var r=B.getBCHTypeNumber(u),e=0;e<18;e+=1){var n=!t&&1==(r>>e&1);g[Math.floor(e/3)][e%3+l-8-3]=n}for(e=0;e<18;e+=1){n=!t&&1==(r>>e&1);g[e%3+l-8-3][Math.floor(e/3)]=n}},v=function(t,r){for(var e=f<<3|r,n=B.getBCHTypeInfo(e),o=0;o<15;o+=1){var i=!t&&1==(n>>o&1);o<6?g[o][8]=i:o<8?g[o+1][8]=i:g[l-15+o][8]=i}for(o=0;o<15;o+=1){i=!t&&1==(n>>o&1);o<8?g[8][l-o-1]=i:o<9?g[8][15-o-1+1]=i:g[8][15-o-1]=i}g[l-8][8]=!t},d=function(t,r){for(var e=-1,n=l-1,o=7,i=0,a=B.getMaskFunction(r),u=l-1;0<u;u-=2)for(6==u&&(u-=1);;){for(var f=0;f<2;f+=1)if(null==g[n][u-f]){var c=!1;i<t.length&&(c=1==(t[i]>>>o&1)),a(n,u-f)&&(c=!c),g[n][u-f]=c,-1==(o-=1)&&(i+=1,o=7)}if((n+=e)<0||l<=n){n-=e,e=-e;break}}},w=function(t,r,e){for(var n=b.getRSBlocks(t,r),o=M(),i=0;i<e.length;i+=1){var a=e[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var u=0;for(i=0;i<n.length;i+=1)u+=n[i].dataCount;if(o.getLengthInBits()>8*u)throw"code length overflow. ("+o.getLengthInBits()+">"+8*u+")";for(o.getLengthInBits()+4<=8*u&&o.put(0,4);o.getLengthInBits()%8!=0;)o.putBit(!1);for(;!(o.getLengthInBits()>=8*u||(o.put(236,8),o.getLengthInBits()>=8*u));)o.put(17,8);return function(t,r){for(var e=0,n=0,o=0,i=new Array(r.length),a=new Array(r.length),u=0;u<r.length;u+=1){var f=r[u].dataCount,c=r[u].totalCount-f;n=Math.max(n,f),o=Math.max(o,c),i[u]=new Array(f);for(var g=0;g<i[u].length;g+=1)i[u][g]=255&t.getBuffer()[g+e];e+=f;var l=B.getErrorCorrectPolynomial(c),h=C(i[u],l.getLength()-1).mod(l);a[u]=new Array(l.getLength()-1);for(g=0;g<a[u].length;g+=1){var s=g+h.getLength()-a[u].length;a[u][g]=0<=s?h.getAt(s):0}}var v=0;for(g=0;g<r.length;g+=1)v+=r[g].totalCount;var d=new Array(v),w=0;for(g=0;g<n;g+=1)for(u=0;u<r.length;u+=1)g<i[u].length&&(d[w]=i[u][g],w+=1);for(g=0;g<o;g+=1)for(u=0;u<r.length;u+=1)g<a[u].length&&(d[w]=a[u][g],w+=1);return d}(o,n)};s.addData=function(t,r){var e=null;switch(r=r||"Byte"){case"Numeric":e=x(t);break;case"Alphanumeric":e=m(t);break;case"Byte":e=L(t);break;case"Kanji":e=D(t);break;default:throw"mode:"+r}c.push(e),n=null},s.isDark=function(t,r){if(t<0||l<=t||r<0||l<=r)throw t+","+r;return g[t][r]},s.getModuleCount=function(){return l},s.make=function(){if(u<1){for(var t=1;t<40;t++){for(var r=b.getRSBlocks(t,f),e=M(),n=0;n<c.length;n++){var o=c[n];e.put(o.getMode(),4),e.put(o.getLength(),B.getLengthInBits(o.getMode(),t)),o.write(e)}var i=0;for(n=0;n<r.length;n++)i+=r[n].dataCount;if(e.getLengthInBits()<=8*i)break}u=t}a(!1,function(){for(var t=0,r=0,e=0;e<8;e+=1){a(!0,e);var n=B.getLostPoint(s);(0==e||n<t)&&(t=n,r=e)}return r}())},s.createTableTag=function(t,r){t=t||2;var e="";e+='<table style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: "+(r=void 0===r?4*t:r)+"px;",e+='">',e+="<tbody>";for(var n=0;n<s.getModuleCount();n+=1){e+="<tr>";for(var o=0;o<s.getModuleCount();o+=1)e+='<td style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: 0px;",e+=" width: "+t+"px;",e+=" height: "+t+"px;",e+=" background-color: ",e+=s.isDark(n,o)?"#000000":"#ffffff",e+=";",e+='"/>';e+="</tr>"}return e+="</tbody>",e+="</table>"},s.createSvgTag=function(t,r,e,n){var o={};"object"==typeof t&&(t=(o=t).cellSize,r=o.margin,e=o.alt,n=o.title),t=t||2,r=void 0===r?4*t:r,(e="string"==typeof e?{text:e}:e||{}).text=e.text||null,e.id=e.text?e.id||"qrcode-description":null,(n="string"==typeof n?{text:n}:n||{}).text=n.text||null,n.id=n.text?n.id||"qrcode-title":null;var i,a,u,f,c=s.getModuleCount()*t+2*r,g="";for(f="l"+t+",0 0,"+t+" -"+t+",0 0,-"+t+"z ",g+='<svg version="1.1" xmlns="http://www.w3.org/2000/svg"',g+=o.scalable?"":' width="'+c+'px" height="'+c+'px"',g+=' viewBox="0 0 '+c+" "+c+'" ',g+=' preserveAspectRatio="xMinYMin meet"',g+=n.text||e.text?' role="img" aria-labelledby="'+p([n.id,e.id].join(" ").trim())+'"':"",g+=">",g+=n.text?'<title id="'+p(n.id)+'">'+p(n.text)+"</title>":"",g+=e.text?'<description id="'+p(e.id)+'">'+p(e.text)+"</description>":"",g+='<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>',g+='<path d="',a=0;a<s.getModuleCount();a+=1)for(u=a*t+r,i=0;i<s.getModuleCount();i+=1)s.isDark(a,i)&&(g+="M"+(i*t+r)+","+u+f);return g+='" stroke="transparent" fill="black"/>',g+="</svg>"},s.createDataURL=function(o,t){o=o||2,t=void 0===t?4*o:t;var r=s.getModuleCount()*o+2*t,i=t,a=r-t;return I(r,r,function(t,r){if(i<=t&&t<a&&i<=r&&r<a){var e=Math.floor((t-i)/o),n=Math.floor((r-i)/o);return s.isDark(n,e)?0:1}return 1})},s.createImgTag=function(t,r,e){t=t||2,r=void 0===r?4*t:r;var n=s.getModuleCount()*t+2*r,o="";return o+="<img",o+=' src="',o+=s.createDataURL(t,r),o+='"',o+=' width="',o+=n,o+='"',o+=' height="',o+=n,o+='"',e&&(o+=' alt="',o+=p(e),o+='"'),o+="/>"};var p=function(t){for(var r="",e=0;e<t.length;e+=1){var n=t.charAt(e);switch(n){case"<":r+="&lt;";break;case">":r+="&gt;";break;case"&":r+="&amp;";break;case'"':r+="&quot;";break;default:r+=n}}return r};return s.createASCII=function(t,r){if((t=t||1)<2)return function(t){t=void 0===t?2:t;var r,e,n,o,i,a=1*s.getModuleCount()+2*t,u=t,f=a-t,c={"██":"█","█ ":"▀"," █":"▄","  ":" "},g={"██":"▀","█ ":"▀"," █":" ","  ":" "},l="";for(r=0;r<a;r+=2){for(n=Math.floor((r-u)/1),o=Math.floor((r+1-u)/1),e=0;e<a;e+=1)i="█",u<=e&&e<f&&u<=r&&r<f&&s.isDark(n,Math.floor((e-u)/1))&&(i=" "),u<=e&&e<f&&u<=r+1&&r+1<f&&s.isDark(o,Math.floor((e-u)/1))?i+=" ":i+="█",l+=t<1&&f<=r+1?g[i]:c[i];l+="\n"}return a%2&&0<t?l.substring(0,l.length-a-1)+Array(1+a).join("▀"):l.substring(0,l.length-1)}(r);t-=1,r=void 0===r?2*t:r;var e,n,o,i,a=s.getModuleCount()*t+2*r,u=r,f=a-r,c=Array(t+1).join("██"),g=Array(t+1).join("  "),l="",h="";for(e=0;e<a;e+=1){for(o=Math.floor((e-u)/t),h="",n=0;n<a;n+=1)i=1,u<=n&&n<f&&u<=e&&e<f&&s.isDark(o,Math.floor((n-u)/t))&&(i=0),h+=i?c:g;for(o=0;o<t;o+=1)l+=h+"\n"}return l.substring(0,l.length-1)},s.renderTo2dContext=function(t,r){r=r||2;for(var e=s.getModuleCount(),n=0;n<e;n++)for(var o=0;o<e;o++)t.fillStyle=s.isDark(n,o)?"black":"white",t.fillRect(n*r,o*r,r,r)},s}i.stringToBytes=(i.stringToBytesFuncs={default:function(t){for(var r=[],e=0;e<t.length;e+=1){var n=t.charCodeAt(e);r.push(255&n)}return r}}).default,i.createStringToBytes=function(u,f){var i=function(){function t(){var t=r.read();if(-1==t)throw"eof";return t}for(var r=S(u),e=0,n={};;){var o=r.read();if(-1==o)break;var i=t(),a=t()<<8|t();n[String.fromCharCode(o<<8|i)]=a,e+=1}if(e!=f)throw e+" != "+f;return n}(),a="?".charCodeAt(0);return function(t){for(var r=[],e=0;e<t.length;e+=1){var n=t.charCodeAt(e);if(n<128)r.push(n);else{var o=i[t.charAt(e)];"number"==typeof o?(255&o)==o?r.push(o):(r.push(o>>>8),r.push(255&o)):r.push(a)}}return r}};var r,t,a=1,u=2,o=4,f=8,y={L:1,M:0,Q:3,H:2},e=0,n=1,c=2,g=3,l=4,h=5,s=6,v=7,B=(r=[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],[6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],[6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]],(t={}).getBCHTypeInfo=function(t){for(var r=t<<10;0<=d(r)-d(1335);)r^=1335<<d(r)-d(1335);return 21522^(t<<10|r)},t.getBCHTypeNumber=function(t){for(var r=t<<12;0<=d(r)-d(7973);)r^=7973<<d(r)-d(7973);return t<<12|r},t.getPatternPosition=function(t){return r[t-1]},t.getMaskFunction=function(t){switch(t){case e:return function(t,r){return(t+r)%2==0};case n:return function(t,r){return t%2==0};case c:return function(t,r){return r%3==0};case g:return function(t,r){return(t+r)%3==0};case l:return function(t,r){return(Math.floor(t/2)+Math.floor(r/3))%2==0};case h:return function(t,r){return t*r%2+t*r%3==0};case s:return function(t,r){return(t*r%2+t*r%3)%2==0};case v:return function(t,r){return(t*r%3+(t+r)%2)%2==0};default:throw"bad maskPattern:"+t}},t.getErrorCorrectPolynomial=function(t){for(var r=C([1],0),e=0;e<t;e+=1)r=r.multiply(C([1,w.gexp(e)],0));return r},t.getLengthInBits=function(t,r){if(1<=r&&r<10)switch(t){case a:return 10;case u:return 9;case o:case f:return 8;default:throw"mode:"+t}else if(r<27)switch(t){case a:return 12;case u:return 11;case o:return 16;case f:return 10;default:throw"mode:"+t}else{if(!(r<41))throw"type:"+r;switch(t){case a:return 14;case u:return 13;case o:return 16;case f:return 12;default:throw"mode:"+t}}},t.getLostPoint=function(t){for(var r=t.getModuleCount(),e=0,n=0;n<r;n+=1)for(var o=0;o<r;o+=1){for(var i=0,a=t.isDark(n,o),u=-1;u<=1;u+=1)if(!(n+u<0||r<=n+u))for(var f=-1;f<=1;f+=1)o+f<0||r<=o+f||0==u&&0==f||a==t.isDark(n+u,o+f)&&(i+=1);5<i&&(e+=3+i-5)}for(n=0;n<r-1;n+=1)for(o=0;o<r-1;o+=1){var c=0;t.isDark(n,o)&&(c+=1),t.isDark(n+1,o)&&(c+=1),t.isDark(n,o+1)&&(c+=1),t.isDark(n+1,o+1)&&(c+=1),0!=c&&4!=c||(e+=3)}for(n=0;n<r;n+=1)for(o=0;o<r-6;o+=1)t.isDark(n,o)&&!t.isDark(n,o+1)&&t.isDark(n,o+2)&&t.isDark(n,o+3)&&t.isDark(n,o+4)&&!t.isDark(n,o+5)&&t.isDark(n,o+6)&&(e+=40);for(o=0;o<r;o+=1)for(n=0;n<r-6;n+=1)t.isDark(n,o)&&!t.isDark(n+1,o)&&t.isDark(n+2,o)&&t.isDark(n+3,o)&&t.isDark(n+4,o)&&!t.isDark(n+5,o)&&t.isDark(n+6,o)&&(e+=40);var g=0;for(o=0;o<r;o+=1)for(n=0;n<r;n+=1)t.isDark(n,o)&&(g+=1);return e+=Math.abs(100*g/r/r-50)/5*10},t);function d(t){for(var r=0;0!=t;)r+=1,t>>>=1;return r}var w=function(){for(var r=new Array(256),e=new Array(256),t=0;t<8;t+=1)r[t]=1<<t;for(t=8;t<256;t+=1)r[t]=r[t-4]^r[t-5]^r[t-6]^r[t-8];for(t=0;t<255;t+=1)e[r[t]]=t;var n={glog:function(t){if(t<1)throw"glog("+t+")";return e[t]},gexp:function(t){for(;t<0;)t+=255;for(;256<=t;)t-=255;return r[t]}};return n}();function C(n,o){if(void 0===n.length)throw n.length+"/"+o;var r=function(){for(var t=0;t<n.length&&0==n[t];)t+=1;for(var r=new Array(n.length-t+o),e=0;e<n.length-t;e+=1)r[e]=n[e+t];return r}(),i={getAt:function(t){return r[t]},getLength:function(){return r.length},multiply:function(t){for(var r=new Array(i.getLength()+t.getLength()-1),e=0;e<i.getLength();e+=1)for(var n=0;n<t.getLength();n+=1)r[e+n]^=w.gexp(w.glog(i.getAt(e))+w.glog(t.getAt(n)));return C(r,0)},mod:function(t){if(i.getLength()-t.getLength()<0)return i;for(var r=w.glog(i.getAt(0))-w.glog(t.getAt(0)),e=new Array(i.getLength()),n=0;n<i.getLength();n+=1)e[n]=i.getAt(n);for(n=0;n<t.getLength();n+=1)e[n]^=w.gexp(w.glog(t.getAt(n))+r);return C(e,0).mod(t)}};return i}function p(){var e=[],o={writeByte:function(t){e.push(255&t)},writeShort:function(t){o.writeByte(t),o.writeByte(t>>>8)},writeBytes:function(t,r,e){r=r||0,e=e||t.length;for(var n=0;n<e;n+=1)o.writeByte(t[n+r])},writeString:function(t){for(var r=0;r<t.length;r+=1)o.writeByte(t.charCodeAt(r))},toByteArray:function(){return e},toString:function(){var t="";t+="[";for(var r=0;r<e.length;r+=1)0<r&&(t+=","),t+=e[r];return t+="]"}};return o}var k,A,b=(k=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15],[2,146,116],[3,58,36,2,59,37],[4,36,16,4,37,17],[4,36,12,4,37,13],[2,86,68,2,87,69],[4,69,43,1,70,44],[6,43,19,2,44,20],[6,43,15,2,44,16],[4,101,81],[1,80,50,4,81,51],[4,50,22,4,51,23],[3,36,12,8,37,13],[2,116,92,2,117,93],[6,58,36,2,59,37],[4,46,20,6,47,21],[7,42,14,4,43,15],[4,133,107],[8,59,37,1,60,38],[8,44,20,4,45,21],[12,33,11,4,34,12],[3,145,115,1,146,116],[4,64,40,5,65,41],[11,36,16,5,37,17],[11,36,12,5,37,13],[5,109,87,1,110,88],[5,65,41,5,66,42],[5,54,24,7,55,25],[11,36,12,7,37,13],[5,122,98,1,123,99],[7,73,45,3,74,46],[15,43,19,2,44,20],[3,45,15,13,46,16],[1,135,107,5,136,108],[10,74,46,1,75,47],[1,50,22,15,51,23],[2,42,14,17,43,15],[5,150,120,1,151,121],[9,69,43,4,70,44],[17,50,22,1,51,23],[2,42,14,19,43,15],[3,141,113,4,142,114],[3,70,44,11,71,45],[17,47,21,4,48,22],[9,39,13,16,40,14],[3,135,107,5,136,108],[3,67,41,13,68,42],[15,54,24,5,55,25],[15,43,15,10,44,16],[4,144,116,4,145,117],[17,68,42],[17,50,22,6,51,23],[19,46,16,6,47,17],[2,139,111,7,140,112],[17,74,46],[7,54,24,16,55,25],[34,37,13],[4,151,121,5,152,122],[4,75,47,14,76,48],[11,54,24,14,55,25],[16,45,15,14,46,16],[6,147,117,4,148,118],[6,73,45,14,74,46],[11,54,24,16,55,25],[30,46,16,2,47,17],[8,132,106,4,133,107],[8,75,47,13,76,48],[7,54,24,22,55,25],[22,45,15,13,46,16],[10,142,114,2,143,115],[19,74,46,4,75,47],[28,50,22,6,51,23],[33,46,16,4,47,17],[8,152,122,4,153,123],[22,73,45,3,74,46],[8,53,23,26,54,24],[12,45,15,28,46,16],[3,147,117,10,148,118],[3,73,45,23,74,46],[4,54,24,31,55,25],[11,45,15,31,46,16],[7,146,116,7,147,117],[21,73,45,7,74,46],[1,53,23,37,54,24],[19,45,15,26,46,16],[5,145,115,10,146,116],[19,75,47,10,76,48],[15,54,24,25,55,25],[23,45,15,25,46,16],[13,145,115,3,146,116],[2,74,46,29,75,47],[42,54,24,1,55,25],[23,45,15,28,46,16],[17,145,115],[10,74,46,23,75,47],[10,54,24,35,55,25],[19,45,15,35,46,16],[17,145,115,1,146,116],[14,74,46,21,75,47],[29,54,24,19,55,25],[11,45,15,46,46,16],[13,145,115,6,146,116],[14,74,46,23,75,47],[44,54,24,7,55,25],[59,46,16,1,47,17],[12,151,121,7,152,122],[12,75,47,26,76,48],[39,54,24,14,55,25],[22,45,15,41,46,16],[6,151,121,14,152,122],[6,75,47,34,76,48],[46,54,24,10,55,25],[2,45,15,64,46,16],[17,152,122,4,153,123],[29,74,46,14,75,47],[49,54,24,10,55,25],[24,45,15,46,46,16],[4,152,122,18,153,123],[13,74,46,32,75,47],[48,54,24,14,55,25],[42,45,15,32,46,16],[20,147,117,4,148,118],[40,75,47,7,76,48],[43,54,24,22,55,25],[10,45,15,67,46,16],[19,148,118,6,149,119],[18,75,47,31,76,48],[34,54,24,34,55,25],[20,45,15,61,46,16]],(A={}).getRSBlocks=function(t,r){var e=function(t,r){switch(r){case y.L:return k[4*(t-1)+0];case y.M:return k[4*(t-1)+1];case y.Q:return k[4*(t-1)+2];case y.H:return k[4*(t-1)+3];default:return}}(t,r);if(void 0===e)throw"bad rs block @ typeNumber:"+t+"/errorCorrectionLevel:"+r;for(var n,o,i=e.length/3,a=[],u=0;u<i;u+=1)for(var f=e[3*u+0],c=e[3*u+1],g=e[3*u+2],l=0;l<f;l+=1)a.push((n=g,o=void 0,(o={}).totalCount=c,o.dataCount=n,o));return a},A),M=function(){var e=[],n=0,o={getBuffer:function(){return e},getAt:function(t){var r=Math.floor(t/8);return 1==(e[r]>>>7-t%8&1)},put:function(t,r){for(var e=0;e<r;e+=1)o.putBit(1==(t>>>r-e-1&1))},getLengthInBits:function(){return n},putBit:function(t){var r=Math.floor(n/8);e.length<=r&&e.push(0),t&&(e[r]|=128>>>n%8),n+=1}};return o},x=function(t){var r=a,n=t,e={getMode:function(){return r},getLength:function(t){return n.length},write:function(t){for(var r=n,e=0;e+2<r.length;)t.put(o(r.substring(e,e+3)),10),e+=3;e<r.length&&(r.length-e==1?t.put(o(r.substring(e,e+1)),4):r.length-e==2&&t.put(o(r.substring(e,e+2)),7))}},o=function(t){for(var r=0,e=0;e<t.length;e+=1)r=10*r+i(t.charAt(e));return r},i=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);throw"illegal char :"+t};return e},m=function(t){var r=u,n=t,e={getMode:function(){return r},getLength:function(t){return n.length},write:function(t){for(var r=n,e=0;e+1<r.length;)t.put(45*o(r.charAt(e))+o(r.charAt(e+1)),11),e+=2;e<r.length&&t.put(o(r.charAt(e)),6)}},o=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);if("A"<=t&&t<="Z")return t.charCodeAt(0)-"A".charCodeAt(0)+10;switch(t){case" ":return 36;case"$":return 37;case"%":return 38;case"*":return 39;case"+":return 40;case"-":return 41;case".":return 42;case"/":return 43;case":":return 44;default:throw"illegal char :"+t}};return e},L=function(t){var r=o,e=i.stringToBytes(t),n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=0;r<e.length;r+=1)t.put(e[r],8)}};return n},D=function(t){var r=f,e=i.stringToBytesFuncs.SJIS;if(!e)throw"sjis not supported.";!function(){var t=e("友");if(2!=t.length||38726!=(t[0]<<8|t[1]))throw"sjis not supported."}();var o=e(t),n={getMode:function(){return r},getLength:function(t){return~~(o.length/2)},write:function(t){for(var r=o,e=0;e+1<r.length;){var n=(255&r[e])<<8|255&r[e+1];if(33088<=n&&n<=40956)n-=33088;else{if(!(57408<=n&&n<=60351))throw"illegal char at "+(e+1)+"/"+n;n-=49472}n=192*(n>>>8&255)+(255&n),t.put(n,13),e+=2}if(e<r.length)throw"illegal char at "+(e+1)}};return n},S=function(t){var e=t,n=0,o=0,i=0,r={read:function(){for(;i<8;){if(n>=e.length){if(0==i)return-1;throw"unexpected end of file./"+i}var t=e.charAt(n);if(n+=1,"="==t)return i=0,-1;t.match(/^\s$/)||(o=o<<6|a(t.charCodeAt(0)),i+=6)}var r=o>>>i-8&255;return i-=8,r}},a=function(t){if(65<=t&&t<=90)return t-65;if(97<=t&&t<=122)return t-97+26;if(48<=t&&t<=57)return t-48+52;if(43==t)return 62;if(47==t)return 63;throw"c:"+t};return r},I=function(t,r,e){for(var n=function(t,r){var n=t,o=r,l=new Array(t*r),e={setPixel:function(t,r,e){l[r*n+t]=e},write:function(t){t.writeString("GIF87a"),t.writeShort(n),t.writeShort(o),t.writeByte(128),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(255),t.writeByte(255),t.writeByte(255),t.writeString(","),t.writeShort(0),t.writeShort(0),t.writeShort(n),t.writeShort(o),t.writeByte(0);var r=i(2);t.writeByte(2);for(var e=0;255<r.length-e;)t.writeByte(255),t.writeBytes(r,e,255),e+=255;t.writeByte(r.length-e),t.writeBytes(r,e,r.length-e),t.writeByte(0),t.writeString(";")}},i=function(t){for(var r=1<<t,e=1+(1<<t),n=t+1,o=h(),i=0;i<r;i+=1)o.add(String.fromCharCode(i));o.add(String.fromCharCode(r)),o.add(String.fromCharCode(e));var a=p(),u=function(t){var e=t,n=0,o=0,r={write:function(t,r){if(t>>>r!=0)throw"length over";for(;8<=n+r;)e.writeByte(255&(t<<n|o)),r-=8-n,t>>>=8-n,n=o=0;o|=t<<n,n+=r},flush:function(){0<n&&e.writeByte(o)}};return r}(a);u.write(r,n);var f=0,c=String.fromCharCode(l[f]);for(f+=1;f<l.length;){var g=String.fromCharCode(l[f]);f+=1,o.contains(c+g)?c+=g:(u.write(o.indexOf(c),n),o.size()<4095&&(o.size()==1<<n&&(n+=1),o.add(c+g)),c=g)}return u.write(o.indexOf(c),n),u.write(e,n),u.flush(),a.toByteArray()},h=function(){var r={},e=0,n={add:function(t){if(n.contains(t))throw"dup key:"+t;r[t]=e,e+=1},size:function(){return e},indexOf:function(t){return r[t]},contains:function(t){return void 0!==r[t]}};return n};return e}(t,r),o=0;o<r;o+=1)for(var i=0;i<t;i+=1)n.setPixel(i,o,e(i,o));var a=p();n.write(a);for(var u=function(){function e(t){a+=String.fromCharCode(r(63&t))}var n=0,o=0,i=0,a="",t={},r=function(t){if(t<0);else{if(t<26)return 65+t;if(t<52)return t-26+97;if(t<62)return t-52+48;if(62==t)return 43;if(63==t)return 47}throw"n:"+t};return t.writeByte=function(t){for(n=n<<8|255&t,o+=8,i+=1;6<=o;)e(n>>>o-6),o-=6},t.flush=function(){if(0<o&&(e(n<<6-o),o=n=0),i%3!=0)for(var t=3-i%3,r=0;r<t;r+=1)a+="="},t.toString=function(){return a},t}(),f=a.toByteArray(),c=0;c<f.length;c+=1)u.writeByte(f[c]);return u.flush(),"data:image/gif;base64,"+u};return i}();qrcode.stringToBytesFuncs["UTF-8"]=function(t){return function(t){for(var r=[],e=0;e<t.length;e++){var n=t.charCodeAt(e);n<128?r.push(n):n<2048?r.push(192|n>>6,128|63&n):n<55296||57344<=n?r.push(224|n>>12,128|n>>6&63,128|63&n):(e++,n=65536+((1023&n)<<10|1023&t.charCodeAt(e)),r.push(240|n>>18,128|n>>12&63,128|n>>6&63,128|63&n))}return r}(t)},function(t){"function"==typeof define&&define.amd?define([],t):"object"==typeof exports&&(module.exports=t())}(function(){return qrcode});
+return qrcode;
+})();
+
+const API = "https://api.bilibili.com";
+const MEMBER = "https://member.bilibili.com";
+const IM = "https://api.vc.bilibili.com";
+const PASSPORT = "https://passport.bilibili.com";
+// Official Bilibili header level SVG fills, verified 2026-11-09.
+const LEVEL_COLORS = ["#C0C0C0", "#C0C0C0", "#8BD29B", "#7BCDEF", "#FEBB8B", "#EE672A", "#FF0000"];
+const MARK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 2 3 4m7-4-3 4"/><rect x="3" y="6" width="18" height="15" rx="4"/><path d="M8 11v3m8-3v3m-7 3h6"/></svg>';
+const h = (type, props = {}, ...children) => ({ type, props, children: children.flat().filter(v => v != null && v !== false) });
+const text = (value, props = {}) => h("Text", { text: String(value), ...props });
+const count = value => Number.isSafeInteger(value) && value >= 0;
+const metric = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const comma = value => value == null ? "—" : String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+const signed = value => (value > 0 ? "+" : "") + comma(value);
+const stamp = time => {
+  if (!time) return "尚未更新";
+  const d = new Date(time);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+const launch = url => () => $metrix.openURL(url);
+let credential = "", inputError = "", videoLimit = 5, initialized = false, generation = 0;
+let account = null, followers = null, videos = null, privateMessages = null, notifications = null;
+let privateDisplay = "summary", privateLimit = 5, privateCardSize = "normal", conversations = null;
+let times = {}, errors = {}, loading = false, inflight = null, inflightGeneration = -1, refreshController = null;
+let tab = "messages";
+// --stage-* maps to native background/text/textMuted/border/surface/accent/accentText.
+const TABS = [{ id: "messages", label: "消息" }, { id: "dynamic", label: "动态" }, { id: "videos", label: "视频" }, { id: "account", label: "账户" }];
+let menuRanks = TABS.map((_, index) => (index + 1) * 10);
+function updateTabs(initial = false) {
+  tabs = TABS.slice().sort((a, b) => menuRanks[TABS.indexOf(a)] - menuRanks[TABS.indexOf(b)])
+    .filter(item => item.id === "account" ? features.identity || features.followers || features.level
+      : item.id === "messages" ? messagesEnabled() : features[item.id]);
+  if (!tabs.length) tabs = [TABS.find(item => item.id === "account")];
+  if (initial || !tabs.some(item => item.id === tab)) tab = tabs[0].id;
+  stopMotion();
+}
+const VIDEO_STATS = [
+  { option: "video_views", label: "播放", field: "views", api: "view" },
+  { option: "video_likes", label: "点赞", field: "likes", api: "like" },
+  { option: "video_favorites", label: "收藏", field: "favorites", api: "favorite" },
+  { option: "video_coins", label: "投币", field: "coins", api: "coin" },
+  { option: "video_comments", label: "评论", field: "replies", api: "reply" },
+];
+const NOTIFICATION_FEATURE_KEYS = ["message_likes", "message_replies", "message_mentions", "message_system", "message_assistant"];
+const FEATURE_KEYS = ["account", "identity", "followers", "level", "videos", "messages", "dynamic", "video_cover", "video_date",
+  ...VIDEO_STATS.map(stat => stat.option), "message_private", ...NOTIFICATION_FEATURE_KEYS];
+let features = Object.fromEntries(FEATURE_KEYS.map(key => [key, true])), tabs = TABS;
+let dynamics = null, dynamicController = null, dynamicInflight = null;
+let dynamicFilterUID = null, dynamicFilter = { mode: "all", uids: [] };
+let dynamicFilterOpen = false, dynamicSearch = "", dynamicUIDDraft = "", dynamicFilterError = "";
+const validUID = value => typeof value === "string" && /^[1-9]\d{0,15}$/.test(value) && Number.isSafeInteger(Number(value));
+function restoreDynamicFilter(uid) {
+  if (dynamicFilterUID === uid) return;
+  cancelDynamicRefresh();
+  dynamics = null;
+  delete times.dynamic;
+  delete errors.dynamic;
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem("dynamic-filter:v1:" + uid) || "null"); } catch {}
+  dynamicFilterUID = uid;
+  dynamicFilter = { mode: ["all", "include", "exclude"].includes(saved?.mode) ? saved.mode : "all",
+    uids: Array.isArray(saved?.uids) ? [...new Set(saved.uids.filter(validUID))].slice(0, 100) : [] };
+  dynamicSearch = dynamicUIDDraft = dynamicFilterError = "";
+  dynamicFilterOpen = false;
+}
+function saveDynamicFilter(next) {
+  if (!account || dynamicFilterUID !== account.uid) return;
+  if (!["all", "include", "exclude"].includes(next.mode) || !next.uids.every(validUID)) return;
+  if (next.uids.length > 100) { dynamicFilterError = "最多选择 100 位用户。"; $metrix.invalidate(); return; }
+  try { localStorage.setItem("dynamic-filter:v1:" + account.uid, JSON.stringify(next)); }
+  catch { dynamicFilterError = "用户筛选保存失败，请重试。"; $metrix.invalidate(); return; }
+  dynamicFilter = next;
+  dynamicFilterError = "";
+  $metrix.invalidate();
+}
+function selectDynamicUser(uid, selected) {
+  saveDynamicFilter({ ...dynamicFilter, uids: selected ? [...new Set([...dynamicFilter.uids, uid])]
+    : dynamicFilter.uids.filter(value => value !== uid) });
+}
+function addDynamicUser() {
+  const uid = dynamicUIDDraft.trim();
+  if (!validUID(uid)) { dynamicFilterError = "请输入有效的数字 UID。"; $metrix.invalidate(); return; }
+  selectDynamicUser(uid, true);
+  if (!dynamicFilterError) dynamicUIDDraft = "";
+}
+const privateEnabled = () => features.messages && features.message_private;
+const notificationsEnabled = () => features.messages && NOTIFICATION_FEATURE_KEYS.some(key => features[key]);
+const messagesEnabled = () => privateEnabled() || notificationsEnabled();
+const PRIVATE_RATES = {
+  "5m": { ms: 300000, label: "5 分钟" }, "10m": { ms: 600000, label: "10 分钟" },
+  "30m": { ms: 1800000, label: "30 分钟" }, "1h": { ms: 3600000, label: "1 小时" },
+  "6h": { ms: 21600000, label: "6 小时" },
+};
+let privateRate = "10m", privateLive = false, privateTimer = null, privateInflight = null;
+let privateController = null, privateAttemptAt = 0;
+const MOTION = { tabs: 250, page: 250, distance: 8, blur: 3, press: 150, spin: 500, spinReset: 900, bar: 400 };
+// Heroicons outline refresh icon: Copyright (c) Tailwind Labs, Inc., MIT.
+// The MIT permission and warranty notice bundled above also applies to this icon.
+const REFRESH_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.25"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>';
+let uiLive = false, motionTimer = null, reducedQuery = null;
+let tabMotion = null, barStarted = null, spinStarted = null, barIdentity = "";
+const clamp = value => Math.max(0, Math.min(1, value));
+// CSS cubic-bezier(0.22, 1, 0.36, 1), solving X before evaluating Y.
+function smoothOut(progress) {
+  if (progress <= 0 || progress >= 1) return clamp(progress);
+  let t = progress;
+  for (let i = 0; i < 7; i++) {
+    const s = 1 - t;
+    const x = 0.66 * s * s * t + 1.08 * s * t * t + t * t * t;
+    const derivative = 0.66 * s * s + 0.84 * s * t + 1.92 * t * t;
+    t = clamp(t - (x - progress) / derivative);
+  }
+  return 1 - (1 - t) ** 3;
+}
+const motionAllowed = () => uiLive && reducedQuery?.matches === false;
+const tabIndex = () => tabs.findIndex(item => item.id === tab);
+function pageTargets(index) {
+  return tabs.map((_, i) => ({ x: i === index ? 0 : i < index ? -MOTION.distance : MOTION.distance,
+    opacity: i === index ? 1 : 0, blur: i === index ? 0 : MOTION.blur }));
+}
+function pageVisuals(now = Date.now()) {
+  const targets = pageTargets(tabIndex());
+  if (!motionAllowed() || !tabMotion) return targets;
+  const progress = smoothOut(clamp((now - tabMotion.started) / MOTION.page));
+  return targets.map((target, i) => Object.fromEntries(Object.keys(target).map(key =>
+    [key, tabMotion.pages[i][key] + (target[key] - tabMotion.pages[i][key]) * progress])));
+}
+function pillPosition(now = Date.now()) {
+  const target = tabIndex();
+  return !motionAllowed() || !tabMotion ? target : tabMotion.pill + (target - tabMotion.pill) * smoothOut(clamp((now - tabMotion.started) / MOTION.tabs));
+}
+function stopMotion() {
+  clearTimeout(motionTimer);
+  motionTimer = null;
+  tabMotion = null;
+  barStarted = spinStarted = null;
+}
+function motionPreferenceChanged() {
+  stopMotion();
+  $metrix.invalidate();
+}
+function motionTick() {
+  motionTimer = null;
+  const now = Date.now();
+  if (tabMotion && now - tabMotion.started >= MOTION.page) tabMotion = null;
+  if (barStarted !== null && now - barStarted >= MOTION.bar) barStarted = null;
+  if (spinStarted !== null && now - spinStarted >= MOTION.spinReset + MOTION.spin) spinStarted = null;
+  $metrix.invalidate();
+  wakeMotion();
+}
+function wakeMotion() {
+  if (motionAllowed() && motionTimer === null && (tabMotion || barStarted !== null || spinStarted !== null))
+    motionTimer = setTimeout(motionTick, 16);
+}
+function startMotion() {
+  uiLive = true;
+  if (typeof globalThis.matchMedia === "function") {
+    reducedQuery = globalThis.matchMedia("(prefers-reduced-motion: reduce)");
+    reducedQuery.addEventListener("change", motionPreferenceChanged);
+  }
+  if (account && motionAllowed()) { barStarted = Date.now(); wakeMotion(); }
+}
+function selectTab(value) {
+  const next = typeof value === "number" ? tabs[value]?.id : value;
+  if (!tabs.some(item => item.id === next) || next === tab) return;
+  const now = Date.now(), pages = pageVisuals(now), pill = pillPosition(now);
+  tab = next;
+  tabMotion = motionAllowed() ? { started: now, pages, pill } : null;
+  if (next === "account" && motionAllowed()) barStarted = now;
+  wakeMotion();
+  $metrix.invalidate();
+}
+function requestRefresh() {
+  if (inputError) return Promise.resolve();
+  spinStarted = motionAllowed() ? Date.now() : null;
+  wakeMotion();
+  return refresh();
+}
+function refreshAngle(now) {
+  if (!motionAllowed() || spinStarted === null) return 0;
+  const elapsed = now - spinStarted;
+  if (elapsed < MOTION.spin) return 360 * smoothOut(clamp(elapsed / MOTION.spin));
+  if (elapsed < MOTION.spinReset) return 360;
+  return 360 * (1 - smoothOut(clamp((elapsed - MOTION.spinReset) / MOTION.spin)));
+}
+function pressFrames(from, to) {
+  return { duration: MOTION.press, ease: "linear", frames: Array.from({ length: 31 }, (_, i) =>
+    ({ at: i / 30, scale: from + (to - from) * smoothOut(i / 30) })) };
+}
+const PRESS = { small: { down: pressFrames(1, 0.99), up: pressFrames(0.99, 1) },
+  refresh: { down: pressFrames(1, 0.97), up: pressFrames(0.97, 1) } };
+const LOGIN_REVEAL = { duration: MOTION.page, ease: "linear", frames: Array.from({ length: 31 }, (_, i) => {
+  const progress = smoothOut(i / 30);
+  return { at: i / 30, opacity: progress, y: 4 * (1 - progress) };
+}) };
+function pressStyle(kind = "small") {
+  return motionAllowed() ? { keyframes: PRESS[kind].up, pressed: { keyframes: PRESS[kind].down } } : {};
+}
+let lastEnv;
+let login = { phase: "idle", message: "", svg: "", key: "", expires: 0 };
+let loginVersion = 0, loginTimer = null, loginRequestController = null, loginPolling = false;
+
+function cancelLogin(invalidate = true) {
+  loginVersion++;
+  clearTimeout(loginTimer);
+  loginTimer = null;
+  if (loginRequestController) loginRequestController.abort();
+  loginRequestController = null;
+  loginPolling = false;
+  login = { phase: "idle", message: "", svg: "", key: "", expires: 0 };
+  if (invalidate) $metrix.invalidate();
+}
+async function passport(path) {
+  const controller = new AbortController();
+  loginRequestController = controller;
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const response = await fetch(PASSPORT + path, {
+      headers: { Referer: "https://www.bilibili.com/" }, redirect: "error", signal: controller.signal,
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.code !== 0 || !payload.data) throw new Error();
+    return { data: payload.data, cookie: response.headers.get("set-cookie") || "" };
+  } catch { throw new RequestError("登录请求失败，请重新生成二维码后再试。"); }
+  finally {
+    clearTimeout(timeout);
+    if (loginRequestController === controller) loginRequestController = null;
+  }
+}
+function loginFailure(error, phase = "error") {
+  clearTimeout(loginTimer);
+  loginTimer = null;
+  login = { phase, message: safeError(error), svg: "", key: "", expires: 0 };
+  $metrix.invalidate();
+}
+function scheduleLoginPoll(version) {
+  clearTimeout(loginTimer);
+  loginTimer = setTimeout(() => { void pollLogin(version); }, 2000);
+}
+async function startLogin() {
+  if (login.phase === "saving") return;
+  cancelLogin(false);
+  const version = loginVersion;
+  login.phase = "generating";
+  login.message = "正在生成二维码…";
+  $metrix.invalidate();
+  try {
+    const { data } = await passport("/x/passport-login/web/qrcode/generate");
+    if (version !== loginVersion) return;
+    const url = new URL(data.url);
+    if (!["https://account.bilibili.com", PASSPORT].includes(url.origin) || url.username || url.password
+        || !/^[a-f0-9]{32}$/i.test(data.qrcode_key || "")) throw new RequestError("B 站返回了无效的登录二维码，请重新生成。");
+    const qr = createQRCode(0, "M");
+    qr.addData(data.url);
+    qr.make();
+    login = { phase: "waiting", message: "请使用哔哩哔哩 App 扫一扫", key: data.qrcode_key,
+      svg: qr.createSvgTag({ cellSize: 4, margin: 16, scalable: true }), expires: Date.now() + 180000 };
+    scheduleLoginPoll(version);
+    $metrix.invalidate();
+  } catch (error) { if (version === loginVersion) loginFailure(error); }
+}
+function loginSession(data, cookie) {
+  // Set-Cookie is canonical. The documented callback query is used only as local data.
+  let session = /(?:^|,\s*)SESSDATA=([^;\s]+)/.exec(cookie)?.[1];
+  if (!session) {
+    const callback = new URL(data.url);
+    if (!["https://passport.biligame.com", PASSPORT].includes(callback.origin)) throw new RequestError("登录响应缺少有效凭据，请重新扫码。");
+    session = callback.searchParams.get("SESSDATA");
+    if (session && !session.includes("%")) session = encodeURIComponent(session);
+  }
+  if (!session || session.length > 2560 || /[\s;\r\n]/.test(session)) throw new RequestError("登录响应缺少有效凭据，请重新扫码。");
+  return session;
+}
+async function pollLogin(version) {
+  if (version !== loginVersion || loginPolling || !["waiting", "scanned"].includes(login.phase)) return;
+  if (Date.now() >= login.expires) {
+    loginFailure(new RequestError("二维码已过期，请重新生成。"), "expired");
+    return;
+  }
+  loginPolling = true;
+  try {
+    const { data, cookie } = await passport("/x/passport-login/web/qrcode/poll?qrcode_key=" + encodeURIComponent(login.key));
+    if (version !== loginVersion) return;
+    if (data.code === 86101 || data.code === 86090) {
+      login.phase = data.code === 86090 ? "scanned" : "waiting";
+      login.message = data.code === 86090 ? "已扫描，请在手机上确认登录" : "等待扫码 · 二维码 3 分钟内有效";
+      $metrix.invalidate();
+      scheduleLoginPoll(version);
+      return;
+    }
+    if (data.code === 86038) {
+      loginFailure(new RequestError("二维码已过期，请重新生成。"), "expired");
+      return;
+    }
+    if (data.code !== 0) throw new RequestError("扫码登录未完成，请重新生成二维码。");
+    const session = loginSession(data, cookie);
+    // Verify identity before replacing the saved session. Cancellation invalidates this result.
+    readAccount(await get(API, "/x/web-interface/nav", session, AbortSignal.timeout(6000)));
+    if (version !== loginVersion) return;
+    clearTimeout(loginTimer);
+    login = { phase: "saving", message: "确认成功，正在保存登录凭据…", svg: "", key: "", expires: 0 };
+    $metrix.invalidate();
+    try { await $metrix.setSecret("sessdata", session); }
+    catch { throw new RequestError("登录凭据保存失败，请重新扫码登录。"); }
+    if (version !== loginVersion) return;
+    cancelLogin(false);
+    sync(lastEnv);
+    $metrix.invalidate();
+    await refresh();
+  } catch (error) { if (version === loginVersion) loginFailure(error); }
+  finally { if (version === loginVersion) loginPolling = false; }
+}
+
+function sync(env) {
+  lastEnv = env;
+  privateCardSize = env.inputs.private_card_size === "compact" ? "compact" : "normal";
+  let next = "";
+  try { next = String($metrix.secret("sessdata") || "").trim(); } catch {}
+  const limit = Number(env.inputs.video_count || "5");
+  const rate = PRIVATE_RATES[env.inputs.private_refresh]?.ms ? env.inputs.private_refresh : "10m";
+  const display = env.inputs.private_display === "list" ? "list" : "summary";
+  const requestedPrivateLimit = Number(env.inputs.private_count || "5");
+  const nextPrivateLimit = [3, 5, 10].includes(requestedPrivateLimit) ? requestedPrivateLimit : 5;
+  const nextFeatures = Object.fromEntries(FEATURE_KEYS.map(key => [key, env.inputs["show_" + key] !== false]));
+  if (!nextFeatures.account) for (const key of ["identity", "followers", "level"]) nextFeatures[key] = false;
+  const nextMenuRanks = TABS.map((item, index) => Number.isSafeInteger(env.inputs["order_" + item.id])
+    ? env.inputs["order_" + item.id] : (index + 1) * 10);
+  const menuChanged = nextMenuRanks.some((rank, index) => rank !== menuRanks[index]);
+  if (menuChanged) menuRanks = nextMenuRanks;
+  const featuresChanged = FEATURE_KEYS.some(key => nextFeatures[key] !== features[key]);
+  if (initialized && next === credential && limit === videoLimit && rate === privateRate
+      && display === privateDisplay && nextPrivateLimit === privateLimit && !featuresChanged) {
+    if (menuChanged) updateTabs();
+    return;
+  }
+  const changedAccount = !initialized || next !== credential;
+  const firstSync = !initialized;
+  initialized = true;
+  generation++;
+  refreshController?.abort();
+  cancelPrivateRefresh();
+  cancelDynamicRefresh();
+  credential = next;
+  videoLimit = [3, 5, 10].includes(limit) ? limit : 5;
+  if (rate !== privateRate) privateAttemptAt = Date.now();
+  privateRate = rate;
+  privateDisplay = display;
+  privateLimit = nextPrivateLimit;
+  features = nextFeatures;
+  updateTabs(firstSync);
+  inputError = !next ? "扫码登录以连接自己的 B 站账户。"
+    : /[\s;\r\n]/.test(next) || /^SESSDATA=/i.test(next) ? "只填写 SESSDATA 的值，不要填写整段 Cookie。" : "";
+  if (changedAccount) {
+    account = followers = videos = privateMessages = notifications = conversations = null;
+    dynamics = null;
+    dynamicFilterUID = null;
+    dynamicFilter = { mode: "all", uids: [] };
+    dynamicSearch = dynamicUIDDraft = dynamicFilterError = "";
+    dynamicFilterOpen = false;
+    times = {};
+    errors = {};
+    privateAttemptAt = 0;
+  }
+  if (!features.followers) {
+    followers = null;
+    delete times.followers;
+    delete errors.followers;
+  }
+  if (!features.videos) {
+    videos = null;
+    delete times.videos;
+    delete errors.videos;
+  }
+  if (!privateEnabled()) {
+    privateMessages = null;
+    delete times.private;
+    delete errors.private;
+    privateAttemptAt = 0;
+  }
+  if (!privateEnabled() || privateDisplay !== "list") {
+    conversations = null;
+    delete times.conversations;
+    delete errors.conversations;
+  }
+  if (!notificationsEnabled()) {
+    notifications = null;
+    delete times.notifications;
+    delete errors.notifications;
+  }
+  if (!features.dynamic) {
+    dynamics = null;
+    delete times.dynamic;
+    delete errors.dynamic;
+  }
+  armPrivateRefresh();
+}
+
+class RequestError extends Error {}
+async function get(origin, path, session, signal) {
+  let response;
+  try {
+    response = await fetch(origin + path, {
+      headers: { Cookie: "SESSDATA=" + session, Referer: origin === MEMBER ? MEMBER + "/platform/upload-manager/article" : "https://www.bilibili.com/" },
+      redirect: "error", signal,
+    });
+  } catch { throw new RequestError("网络请求失败或超时，请稍后手动刷新。"); }
+  let payload;
+  try { payload = await response.json(); }
+  catch { throw new RequestError(response.ok ? "B 站返回了非 JSON 响应，可能触发风控。" : "请求失败：HTTP " + response.status); }
+  if (!response.ok) throw new RequestError("请求失败：HTTP " + response.status);
+  if (payload.code === -101 || payload.code === -111 || payload.code === -6) throw new RequestError("登录会话已失效，请重新扫码登录。");
+  if (payload.code === -352 || payload.code === -412 || payload.data?.v_voucher) throw new RequestError("B 站风控校验未通过，请稍后刷新并检查网页版登录状态。");
+  if (payload.code !== 0 || !payload.data) throw new RequestError("B 站接口返回错误（" + (Number.isFinite(payload.code) ? payload.code : "未知") + "）。");
+  return payload.data;
+}
+function invalid() { throw new RequestError("B 站接口数据结构已变化，暂时无法读取。"); }
+function imageURL(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  try {
+    const url = new URL(value.startsWith("//") ? "https:" + value : value);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.port
+        || !["i0.hdslb.com", "i1.hdslb.com", "i2.hdslb.com"].includes(url.hostname)) return "";
+    url.protocol = "https:";
+    return url.href;
+  } catch { return ""; }
+}
+function readAccount(data) {
+  if (data.isLogin !== true) throw new RequestError("登录会话已失效，请重新扫码登录。");
+  const lv = data.level_info;
+  if (!count(data.mid) || data.mid === 0 || typeof data.uname !== "string" || !metric(data.money)
+      || !lv || !count(lv.current_level) || !count(lv.current_exp) || !count(lv.current_min)) invalid();
+  const maxLevel = lv.current_level >= 6;
+  if (!maxLevel && (!count(lv.next_exp) || lv.next_exp <= lv.current_min)) invalid();
+  return { uid: data.mid, name: data.uname, avatar: imageURL(data.face), senior: data.is_senior_member === 1,
+    coins: data.money, level: lv.current_level, xp: lv.current_exp, floor: lv.current_min, next: maxLevel ? null : lv.next_exp };
+}
+function sampleFollowers(uid, data) {
+  if (data.mid !== uid || !count(data.follower) || !count(data.following)) invalid();
+  const key = "followers:v1:" + uid;
+  let previous = null;
+  try { previous = JSON.parse(localStorage.getItem(key) || "null"); }
+  catch { /* A missing/corrupt sample establishes a new baseline. */ }
+  const usable = previous && count(previous.count) && metric(previous.at) && previous.at <= Date.now();
+  const sample = { count: data.follower, at: Date.now(),
+    delta: usable ? data.follower - previous.count : null, since: usable ? previous.at : null };
+  localStorage.setItem(key, JSON.stringify(sample));
+  return { ...sample, following: data.following };
+}
+function readPrivate(data) {
+  if (!count(data.follow_unread) || !count(data.unfollow_unread)) invalid();
+  return { total: data.follow_unread + data.unfollow_unread,
+    followed: data.follow_unread, unfollowed: data.unfollow_unread,
+    intercepted: count(data.dustbin_unread) ? data.dustbin_unread : null };
+}
+function readNotifications(data) {
+  const value = key => count(data[key]) ? data[key] : null;
+  const result = { reply: value("reply"), at: value("at"),
+    combined: value("recv_reply"), likes: value("recv_like") ?? value("like"),
+    system: value("sys_msg"), assistant: value("up"), coins: value("coin"), favorites: value("favorite") };
+  if (Object.values(result).every(v => v === null)) invalid();
+  return result;
+}
+function dynamicExcerpt(item, forwarded = false) {
+  const content = item?.modules?.module_dynamic;
+  if (!content) return "动态内容暂不可用，请打开原文查看。";
+  const major = content.major;
+  if (major?.type === "MAJOR_TYPE_NONE") return "原动态已失效";
+  const parts = [content.desc?.text, major?.archive?.title, major?.opus?.title, major?.opus?.summary?.text,
+    major?.article?.title, major?.common?.title, major?.music?.title, major?.pgc?.title];
+  if (!forwarded && item.type === "DYNAMIC_TYPE_FORWARD") {
+    const author = item.orig?.modules?.module_author?.name;
+    parts.push(item.orig ? "转发" + (typeof author === "string" ? " @" + author : "") + "：" + dynamicExcerpt(item.orig, true) : "原动态已失效");
+  }
+  return [...new Set(parts.filter(value => typeof value === "string" && value.trim()).map(value => value.trim()))].join("\n").slice(0, 600)
+    || (major?.type === "MAJOR_TYPE_DRAW" ? "图片动态，请打开原文查看。" : "此类动态请打开原文查看。");
+}
+function readDynamics(data) {
+  if (!Array.isArray(data.items) || typeof data.has_more !== "boolean"
+      || (data.has_more && (typeof data.offset !== "string" || !data.offset || data.offset.length > 256))) invalid();
+  const seen = new Set(), items = [];
+  for (const item of data.items) {
+    if (item?.visible === false) continue;
+    const author = item?.modules?.module_author;
+    const published = typeof author?.pub_ts === "string" && /^\d{1,16}$/.test(author.pub_ts)
+      ? Number(author.pub_ts) : author?.pub_ts;
+    if (typeof item?.id_str !== "string" || !/^[1-9]\d{0,31}$/.test(item.id_str) || !author
+        || !count(author.mid) || !author.mid || typeof author.name !== "string" || !count(published)
+        || !Number.isSafeInteger(published * 1000) || !item.modules.module_dynamic) invalid();
+    if (seen.has(item.id_str)) continue;
+    seen.add(item.id_str);
+    items.push({ id: item.id_str, uid: String(author.mid), name: author.name.trim() || "UID " + author.mid,
+      avatar: imageURL(author.face), at: published * 1000, text: dynamicExcerpt(item) });
+  }
+  return { items, hasMore: data.has_more, offset: data.has_more ? data.offset : "" };
+}
+function cancelDynamicRefresh() {
+  dynamicController?.abort();
+  dynamicController = dynamicInflight = null;
+}
+function refreshDynamics(more = false, parentSignal) {
+  if (inputError || !features.dynamic || !account || parentSignal?.aborted) return Promise.resolve();
+  if (dynamicInflight) {
+    if (more) return dynamicInflight;
+    cancelDynamicRefresh();
+  }
+  if (more && (!dynamics?.hasMore || dynamics.items.length >= 100)) return Promise.resolve();
+  const version = generation, uid = account.uid, session = credential, prior = more ? dynamics : null;
+  const controller = new AbortController(), cancel = () => controller.abort();
+  const timeout = setTimeout(cancel, 8000);
+  parentSignal?.addEventListener("abort", cancel, { once: true });
+  dynamicController = controller;
+  const current = () => version === generation && account?.uid === uid && dynamicController === controller && features.dynamic;
+  const query = new URLSearchParams({ type: "all" });
+  if (prior) query.set("offset", prior.offset);
+  const task = (async () => {
+    try {
+      const data = await get(API, "/x/polymer/web-dynamic/v1/feed/all?" + query, session, controller.signal);
+      if (!current()) return;
+      if (controller.signal.aborted) throw new RequestError("动态读取已取消或超时，请重试。");
+      const next = readDynamics(data);
+      if (prior && next.hasMore && (next.offset === prior.offset || prior.cursors.includes(next.offset))) invalid();
+      const items = prior ? [...prior.items] : [], seen = new Set(items.map(item => item.id));
+      for (const item of next.items) if (!seen.has(item.id) && items.length < 100) { seen.add(item.id); items.push(item); }
+      dynamics = { ...next, items, cursors: prior ? [...prior.cursors, prior.offset] : [] };
+      times.dynamic = Date.now();
+      delete errors.dynamic;
+    } catch (error) { if (current()) errors.dynamic = safeError(error); }
+    finally {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", cancel);
+      if (dynamicController === controller) { dynamicController = null; dynamicInflight = null; }
+      $metrix.invalidate();
+    }
+  })();
+  dynamicInflight = task;
+  $metrix.invalidate();
+  return task;
+}
+function conversationPreview(message) {
+  if (!message) return "暂无消息内容";
+  if (message.sys_cancel || message.msg_status === 1 || message.msg_status === 2
+      || message.msg_type === 5 || message.msg_type === 8) return "[消息已撤回]";
+  if (message.msg_status === 50) return "[图片已失效]";
+  if (message.msg_type === 2) return "[图片]";
+  if (message.msg_type === 6) return "[表情]";
+  if (![1, 7, 10, 11].includes(message.msg_type)) return "[其他消息]";
+  let content;
+  try { content = JSON.parse(message.content); } catch { return "[消息内容暂不可用]"; }
+  const title = typeof content?.title === "string" ? content.title : "";
+  const value = message.msg_type === 1 ? content?.content
+    : message.msg_type === 10 ? [title, content?.text].filter(part => typeof part === "string" && part).join("：")
+    : (message.msg_type === 7 ? "[分享] " : "[视频推送] ") + title;
+  return typeof value === "string" && value.trim()
+    ? value.replace(/\s+/g, " ").trim().slice(0, 160) : "[消息内容暂不可用]";
+}
+async function loadConversations(uid, session, signal) {
+  const rows = [], seen = new Set();
+  let end = null;
+  while (rows.length < privateLimit) {
+    if (signal.aborted) throw new RequestError("会话读取已取消或超时。");
+    const query = "?session_type=1&group_fold=1&unfollow_fold=0&sort_rule=2&size=20&build=0&mobi_app=web"
+      + (end === null ? "" : "&end_ts=" + end);
+    const data = await get(IM, "/session_svr/v1/session_svr/get_sessions" + query, session, signal);
+    if (!(data.session_list === null || Array.isArray(data.session_list)) || ![0, 1].includes(data.has_more)) invalid();
+    const list = data.session_list || [];
+    let cursor = Infinity;
+    for (const item of list) {
+      if (!item || !count(item.session_type) || !count(item.session_ts)) invalid();
+      cursor = Math.min(cursor, item.session_ts);
+    }
+    if (end !== null && list.length && cursor >= end) invalid();
+    list.sort((a, b) => b.session_ts - a.session_ts);
+    for (const item of list) {
+      if (item.session_type !== 1) continue;
+      if ((item.system_msg_type != null && !count(item.system_msg_type))
+          || (item.is_intercept != null && !count(item.is_intercept))) invalid();
+      if (item.system_msg_type || item.is_intercept) continue;
+      if (!count(item.talker_id) || !item.talker_id || !count(item.unread_count)) invalid();
+      if (item.talker_id === uid || seen.has(item.talker_id)) continue;
+      const message = item.last_msg;
+      if (message !== null) {
+        if (!message || message.receiver_type !== 1 || !count(message.sender_uid) || !count(message.receiver_id)
+            || !count(message.msg_type) || !count(message.timestamp) || !Number.isSafeInteger(message.timestamp * 1000)) invalid();
+        if (!(message.sender_uid === item.talker_id && message.receiver_id === uid)
+            && !(message.sender_uid === uid && message.receiver_id === item.talker_id)) invalid();
+      }
+      seen.add(item.talker_id);
+      rows.push({ uid: item.talker_id, unread: item.unread_count, sessionAt: item.session_ts,
+        at: message ? message.timestamp * 1000 : Math.floor(item.session_ts / 1000),
+        preview: (message?.sender_uid === uid ? "我：" : "") + conversationPreview(message) });
+    }
+    if (rows.length >= privateLimit || !data.has_more) break;
+    if (!list.length || !count(cursor) || !cursor) invalid();
+    end = cursor;
+  }
+  rows.sort((a, b) => b.sessionAt - a.sessionAt || a.uid - b.uid);
+  const selected = rows.slice(0, privateLimit);
+  if (!selected.length) return [];
+  if (signal.aborted) throw new RequestError("会话读取已取消或超时。");
+  const query = new URLSearchParams({ uids: selected.map(row => row.uid).join(",") });
+  const cards = await get(IM, "/account/v1/user/cards?" + query, session, signal);
+  if (!Array.isArray(cards)) invalid();
+  const profiles = new Map();
+  for (const card of cards) {
+    if (!card || !count(card.mid) || !card.mid || typeof card.name !== "string") invalid();
+    profiles.set(card.mid, card);
+  }
+  return selected.map(row => {
+    const profile = profiles.get(row.uid);
+    return { ...row, name: profile?.name.trim() || "UID " + row.uid, avatar: imageURL(profile?.face) };
+  });
+}
+async function loadPrivate(session, version, signal) {
+  const uid = account.uid;
+  const jobs = [["private", () => get(IM, "/session_svr/v1/session_svr/single_unread?unread_type=0&show_unfollow_list=1&show_dustbin=1&build=0&mobi_app=web", session, signal),
+    data => { privateMessages = readPrivate(data); }]];
+  if (privateDisplay === "list") jobs.push(["conversations", () => loadConversations(uid, session, signal), data => { conversations = data; }]);
+  await Promise.all(jobs.map(async ([key, request, apply]) => {
+    try {
+      const value = await request();
+      if (version !== generation || !privateEnabled()) return;
+      apply(value);
+      times[key] = Date.now();
+      delete errors[key];
+    } catch (error) { if (version === generation && privateEnabled()) errors[key] = safeError(error); }
+  }));
+}
+function readVideo(data, uid) {
+  if (!data.owner || !count(data.owner.mid)) invalid();
+  if (data.owner.mid !== uid) return null;
+  if (!/^BV[0-9A-Za-z]+$/.test(data.bvid || "") || typeof data.title !== "string" || !count(data.pubdate)) invalid();
+  const stat = data.stat;
+  if (VIDEO_STATS.some(({ option, api }) => features[option] && !count(stat?.[api]))) invalid();
+  return { id: data.bvid, title: data.title, cover: features.video_cover ? imageURL(data.pic) : "", published: data.pubdate * 1000,
+    views: stat?.view, likes: stat?.like, favorites: stat?.favorite, coins: stat?.coin, replies: stat?.reply };
+}
+async function loadVideos(uid, session, signal, limit) {
+  const selected = [], seen = new Set();
+  // Authenticated published uploads avoid the public-space discovery endpoint's HTTP 412.
+  for (let page = 1; selected.length < limit; page++) {
+    const query = new URLSearchParams({ status: "pubed", pn: String(page), ps: "30", coop: "1", interactive: "1" });
+    const data = await get(MEMBER, "/x/web/archives?" + query, session, signal);
+    if (!Array.isArray(data.arc_audits) || !data.page || !count(data.page.count)
+        || !count(data.page.ps) || data.page.ps === 0 || data.page.pn !== page) invalid();
+    if (!data.arc_audits.length) {
+      if ((page - 1) * data.page.ps < data.page.count) invalid();
+      break;
+    }
+    const archives = data.arc_audits.map(item => item.Archive);
+    for (const item of archives) {
+      if (!item || !/^BV[0-9A-Za-z]+$/.test(item.bvid || "") || !count(item.ptime) || !Number.isInteger(item.state)) invalid();
+    }
+    const ordered = archives.filter(item => item.state === 0).sort((a, b) => b.ptime - a.ptime);
+    const candidates = ordered.filter(item => !seen.has(item.bvid));
+    // Bounded concurrency respects the native Worker's four-fetch limit.
+    for (let i = 0; i < candidates.length && selected.length < limit;) {
+      const batch = candidates.slice(i, i + Math.min(3, limit - selected.length));
+      i += batch.length;
+      const details = await Promise.all(batch.map(item => {
+        seen.add(item.bvid);
+        return get(API, "/x/web-interface/view?bvid=" + encodeURIComponent(item.bvid), session, signal);
+      }));
+      for (const detail of details) {
+        const video = readVideo(detail, uid);
+        if (video) selected.push(video);
+      }
+    }
+    if (page * data.page.ps >= data.page.count) break;
+  }
+  return selected.sort((a, b) => b.published - a.published).slice(0, limit);
+}
+function sampleVideos(uid, rows) {
+  const key = "videos:v1:" + uid, now = Date.now(), samples = {};
+  let previous = null;
+  try { previous = JSON.parse(localStorage.getItem(key) || "null"); } catch {}
+  const result = rows.map(video => {
+    const prior = previous?.[video.id];
+    const usable = prior && metric(prior.at) && prior.at <= now;
+    const sample = { at: now }, delta = {};
+    for (const { field } of VIDEO_STATS) {
+      if (count(video[field])) {
+        sample[field] = video[field];
+        delta[field] = usable && count(prior[field]) ? video[field] - prior[field] : null;
+      } else delta[field] = null;
+    }
+    samples[video.id] = sample;
+    return { ...video, delta, since: usable ? prior.at : null };
+  });
+  localStorage.setItem(key, JSON.stringify(samples));
+  return result;
+}
+async function load(session, limit, version, signal) {
+  const next = readAccount(await get(API, "/x/web-interface/nav", session, signal));
+  if (version !== generation) return;
+  account = next;
+  times.account = Date.now();
+  delete errors.account;
+  restoreDynamicFilter(next.uid);
+  // Restore the previous sample only after confirming the logged-in UID.
+  if (features.followers && !followers) {
+    try {
+      const saved = JSON.parse(localStorage.getItem("followers:v1:" + next.uid) || "null");
+      if (saved && count(saved.count) && metric(saved.at)) {
+        followers = { ...saved, following: null };
+        times.followers = saved.at;
+      }
+    } catch {}
+  }
+  const privateRefresh = privateEnabled() ? refreshPrivate(session, version, signal) : Promise.resolve();
+  const tasks = [];
+  if (features.followers) tasks.push(
+    ["followers", () => get(API, "/x/relation/stat?vmid=" + next.uid, session, signal), data => { followers = sampleFollowers(next.uid, data); }]);
+  if (notificationsEnabled()) tasks.push(
+    ["notifications", () => get(IM, "/x/im/web/msgfeed/unread?build=0&mobi_app=web", session, signal), data => { notifications = readNotifications(data); }]);
+  const results = await Promise.allSettled(tasks.map(async ([key, request, apply]) => {
+    const data = await request();
+    if (version !== generation) return;
+    apply(data);
+    times[key] = Date.now();
+    delete errors[key];
+  }));
+  await privateRefresh;
+  if (version !== generation) return;
+  results.forEach((result, i) => {
+    if (result.status === "rejected") errors[tasks[i][0]] = safeError(result.reason);
+  });
+  const dynamicRefresh = features.dynamic ? refreshDynamics(false, signal) : Promise.resolve();
+  if (features.videos) try {
+    const result = await loadVideos(next.uid, session, signal, limit);
+    if (version !== generation) return;
+    videos = sampleVideos(next.uid, result);
+    times.videos = Date.now();
+    delete errors.videos;
+  } catch (error) { if (version === generation) errors.videos = safeError(error); }
+  await dynamicRefresh;
+}
+function safeError(error) {
+  return error instanceof RequestError ? error.message : "数据更新失败，请稍后手动刷新。";
+}
+function refresh() {
+  if (inputError) return Promise.resolve();
+  if (inflight) return inflightGeneration === generation ? inflight : inflight.then(() => refresh());
+  cancelDynamicRefresh();
+  const session = credential, version = generation, controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  refreshController = controller;
+  inflightGeneration = version;
+  loading = true;
+  $metrix.invalidate();
+  inflight = load(session, videoLimit, version, controller.signal)
+    .catch(error => { if (version === generation) errors.account = safeError(error); })
+    .finally(() => {
+      clearTimeout(timeout);
+      if (refreshController === controller) refreshController = null;
+      inflight = null;
+      loading = false;
+      $metrix.invalidate();
+      armPrivateRefresh();
+    });
+  return inflight;
+}
+function cancelPrivateRefresh() {
+  clearTimeout(privateTimer);
+  privateTimer = null;
+  const controller = privateController;
+  privateController = null;
+  privateInflight = null;
+  controller?.abort();
+}
+function armPrivateRefresh() {
+  clearTimeout(privateTimer);
+  privateTimer = null;
+  if (!privateLive || !privateEnabled() || inputError || !account || privateInflight) return;
+  const interval = PRIVATE_RATES[privateRate].ms;
+  const due = privateAttemptAt ? privateAttemptAt + interval : Date.now() + interval;
+  privateTimer = setTimeout(() => {
+    privateTimer = null;
+    void refreshPrivate();
+  }, Math.max(0, due - Date.now()));
+}
+function refreshPrivate(session = credential, version = generation, parentSignal) {
+  if (version !== generation || inputError || !privateEnabled() || !account || parentSignal?.aborted) return Promise.resolve();
+  if (privateInflight) return privateInflight;
+  if (!parentSignal && inflight) return inflight;
+  clearTimeout(privateTimer);
+  privateTimer = null;
+  const controller = new AbortController(), cancel = () => controller.abort();
+  const timeout = setTimeout(cancel, 12000);
+  parentSignal?.addEventListener("abort", cancel, { once: true });
+  privateController = controller;
+  privateAttemptAt = Date.now();
+  privateInflight = loadPrivate(session, version, controller.signal)
+    .finally(() => {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", cancel);
+      if (privateController === controller) {
+        privateController = null;
+        privateInflight = null;
+        armPrivateRefresh();
+      }
+      $metrix.invalidate();
+    });
+  return privateInflight;
+}
+function note(value, props = {}) {
+  return text(value, { fontSize: 12, lineHeight: 1.333333, textColor: "textMuted", ...props });
+}
+function compact(value) {
+  if (value >= 1e8) return (value / 1e8).toFixed(1).replace(/\.0$/, "") + "亿";
+  if (value >= 1e4) return (value / 1e4).toFixed(1).replace(/\.0$/, "") + "万";
+  return comma(value);
+}
+function tile(label, value, key, options = {}) {
+  const content = h("Column", { gap: 0, width: "100%", minWidth: 0 },
+    note(label), text(value, { key, fontSize: 16, lineHeight: 1.375, textColor: options.color || "text", fontFeatures: "tnum", wrap: true }));
+  return h(options.onClick ? "ButtonBase" : "Column", { key: "tile-" + key,
+    padding: 12, radius: 12, background: "surfaceHover", width: "100%", minWidth: 0,
+    ...(options.wide ? { columnSpan: 2 } : {}),
+    ...(options.onClick ? { ...pressStyle(), onClick: options.onClick, label: label + " " + value,
+      hover: { background: "surfacePressed" }, focusRing: true } : {}),
+    ...(options.tooltip ? { tooltip: options.tooltip } : {}) }, content);
+}
+function sectionError(key) {
+  return errors[key] ? h("Column", { padding: 10, gap: 4, radius: 12, border: [1, "warning"], width: "100%" },
+    text(errors[key], { key: "error-" + key, fontSize: 12, textColor: "warning", wrap: true }),
+    note(times[key] ? "上次成功：" + stamp(times[key]) : "此项尚无可用数据")) : null;
+}
+function Account(now) {
+  const delta = followers?.delta;
+  const levelColor = LEVEL_COLORS[Math.min(account.level, 6)];
+  const progress = account.next == null ? 1 : clamp((account.xp - account.floor) / (account.next - account.floor));
+  const entered = motionAllowed() && barStarted !== null ? smoothOut(clamp((now - barStarted) / MOTION.bar)) : 1;
+  const period = followers?.since ? "对比时间：" + stamp(followers.since) + " → " + stamp(followers.at) : "首次成功采样建立基线，按 UID 保存在本机";
+  return h("Column", { gap: 8, width: "100%" },
+    features.identity ? h("Row", { key: "identity-details", height: 34, paddingX: 10, radius: 10, background: "surfaceHover",
+      width: "100%", minWidth: 0, gap: 10, alignItems: "center" },
+      note("UID " + account.uid, { key: "uid", fontSize: 11, grow: 1, minWidth: 0, shrink: 1,
+        singleLine: true, fontFeatures: "tnum", tooltip: "UID " + account.uid }),
+      h("Row", { gap: 5, alignItems: "center", shrink: 0, tooltip: "硬币余额 " + comma(account.coins) },
+        h("Icon", { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m12 8 4 4-4 4-4-4z"/></svg>',
+          width: 14, height: 14, fontSize: 14, textColor: "textMuted" }),
+        note("硬币", { fontSize: 11, singleLine: true }),
+        text(comma(account.coins), { key: "coins", fontSize: 13, fontWeight: 600, singleLine: true, fontFeatures: "tnum" }))) : null,
+    features.followers ? sectionError("followers") : null,
+    features.followers ? h("Grid", { columns: 2, gap: 8, width: "100%" },
+      tile("粉丝总数", comma(followers?.count), "followers", { wide: true }),
+      tile("较上次净变化", !followers ? "—" : delta == null ? "首次建立基线" : signed(delta), "follower-delta",
+        { color: delta > 0 ? "success" : delta < 0 ? "danger" : "text", tooltip: period }),
+      tile("关注数量", comma(followers?.following), "following")) : null,
+    features.level ? h("Column", { gap: 8, padding: 12, radius: 12, background: "surfaceHover", width: "100%" },
+      h("Row", { alignItems: "center", gap: 8, width: "100%" },
+        text("Lv." + account.level, { key: "level", fontSize: 12, fontWeight: 600, height: 20,
+          paddingX: 6, radius: 4, background: levelColor, textColor: "#FFFFFF", shrink: 0 }),
+        account.senior ? text("硬核会员", { key: "senior-member", fontSize: 11, fontWeight: 500,
+          paddingX: 6, height: 18, radius: 9, background: LEVEL_COLORS[6], textColor: "#FFFFFF", shrink: 0 }) : null,
+        h("Spacer"),
+        note(account.next == null ? "已达最高等级" : "距下一级还需 " + comma(Math.max(0, account.next - account.xp)) + " EXP", { minWidth: 0, singleLine: true })),
+      h("Box", { width: "100%", height: 4, radius: 2, background: "border", clip: true, label: "等级经验进度" },
+        h("Box", { key: "level-progress", width: `${progress * entered * 100}%`, height: 4, radius: 2, background: levelColor })),
+      note("累计经验 " + comma(account.xp) + (account.next == null ? " · 已满级" : " / " + comma(account.next)), { key: "experience", fontFeatures: "tnum" })) : null,
+    !features.identity && !features.followers && !features.level
+      ? note("在看板设置中开启需要的功能。", { key: "no-features", wrap: true }) : null);
+}
+function Videos() {
+  let items;
+  if (videos === null) items = note(loading ? "正在读取视频…" : "视频数据尚不可用");
+  else if (videos.length === 0) items = note("还没有公开发布的视频", { key: "no-videos", paddingY: 24, textAlign: "center" });
+  else items = videos.slice(0, videoLimit).map(video => {
+    const stats = VIDEO_STATS.filter(({ option }) => features[option]);
+    const cells = stats.map(({ label, field }) => {
+      const delta = video.delta?.[field] ?? null;
+      const change = delta == null ? "—" : (delta > 0 ? "+" : delta < 0 ? "-" : "") + compact(Math.abs(delta));
+      const comparison = delta == null ? "首次成功采样，建立对比基线" : "较 " + stamp(video.since) + "：" + signed(delta);
+      return h("Column", { gap: 0, minWidth: 0, tooltip: comma(video[field]) + "\n" + comparison },
+        note(label), text(compact(video[field]), { key: video.id + "-" + label, fontSize: 13, fontFeatures: "tnum", singleLine: true }),
+        text(change, { key: "delta-" + video.id + "-" + field, fontSize: 10, minWidth: 0, singleLine: true,
+          fontFeatures: "tnum", textColor: delta > 0 ? "success" : delta < 0 ? "danger" : "textMuted" }));
+    });
+    const heading = h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "center" },
+      features.video_cover && video.cover ? h("Image", { key: video.id + "-cover", src: video.cover, width: 88, height: 50,
+        fit: "cover", radius: 6, clip: true, shrink: 0, label: video.title + "封面" }) : null,
+      h("Column", { gap: 4, grow: 1, minWidth: 0 },
+        text(video.title, { fontSize: 13, fontWeight: 500, maxLines: 2, wrap: true, minWidth: 0 }),
+        features.video_date ? note(stamp(video.published), { key: video.id + "-date", singleLine: true, minWidth: 0, tooltip: video.id }) : null));
+    return h("ButtonBase", { key: video.id, padding: 12, radius: 12, background: "surfaceHover",
+      width: "100%", minWidth: 0, ...pressStyle(), onClick: launch("https://www.bilibili.com/video/" + video.id),
+      label: video.title, tooltip: video.title, hover: { background: "surfacePressed" }, focusRing: true },
+      h("Column", { gap: 8, width: "100%", minWidth: 0 }, heading,
+        cells.length ? h("Grid", { key: video.id + "-stats", columns: cells.length, gap: 4, width: "100%" }, cells) : null));
+  });
+  return h("Column", { gap: 8, width: "100%" }, sectionError("videos"), items);
+}
+function DynamicFilters() {
+  const authors = new Map((dynamics?.items || []).map(item => [item.uid, { uid: item.uid, name: item.name }]));
+  for (const uid of dynamicFilter.uids) if (!authors.has(uid)) authors.set(uid, { uid, name: "UID " + uid });
+  const search = dynamicSearch.trim().toLowerCase();
+  const candidates = [...authors.values()].filter(author => dynamicFilter.uids.includes(author.uid)
+    || !search || author.uid.includes(search) || author.name.toLowerCase().includes(search));
+  return h("Column", { gap: 8, width: "100%" },
+    h("Select", { key: "dynamic-filter-mode", label: "动态用户筛选", value: dynamicFilter.mode, width: "100%",
+      items: [{ label: "全部用户", value: "all" }, { label: "只看选中用户", value: "include" }, { label: "屏蔽选中用户", value: "exclude" }],
+      onChange: mode => saveDynamicFilter({ ...dynamicFilter, mode }) }),
+    note("按发布者筛选，也可直接添加 UID。", { wrap: true }),
+    h("SearchField", { key: "dynamic-author-search", value: dynamicSearch, placeholder: "搜索昵称或 UID", width: "100%",
+      onChange: value => { dynamicSearch = String(value); $metrix.invalidate(); } }),
+    h("Row", { gap: 6, width: "100%", alignItems: "center" },
+      h("TextInput", { key: "dynamic-user-add", value: dynamicUIDDraft, placeholder: "添加用户 UID", grow: 1, minWidth: 0,
+        onChange: value => { dynamicUIDDraft = String(value); }, onSubmit: addDynamicUser }),
+      h("Button", { key: "dynamic-user-add-button", text: "添加", onClick: addDynamicUser })),
+    dynamicFilterError ? note(dynamicFilterError, { textColor: "warning", wrap: true }) : null,
+    h("Scroll", { maxHeight: 150, width: "100%" }, h("Column", { gap: 6, width: "100%", paddingRight: 12 },
+      candidates.map(author => h("Checkbox", { key: "dynamic-user-" + author.uid, label: author.name + " · " + author.uid,
+        value: dynamicFilter.uids.includes(author.uid), onChange: selected => selectDynamicUser(author.uid, selected === true) })),
+      !candidates.length ? note("没有匹配用户，可直接添加 UID。", { wrap: true }) : null)),
+    h("Button", { key: "dynamic-filter-clear", text: "清空已选用户", disabled: !dynamicFilter.uids.length,
+      onClick: () => saveDynamicFilter({ ...dynamicFilter, uids: [] }) }));
+}
+function Dynamics() {
+  const selected = new Set(dynamicFilter.uids);
+  const items = (dynamics?.items || []).filter(item => dynamicFilter.mode === "all"
+    || (dynamicFilter.mode === "include" ? selected.has(item.uid) : !selected.has(item.uid)));
+  const summary = (dynamicFilter.mode === "all" ? "全部用户" : dynamicFilter.mode === "include" ? "只看选中用户" : "屏蔽选中用户")
+    + (dynamicFilter.mode === "all" ? "" : " · " + selected.size + " 位");
+  return h("Column", { gap: 8, width: "100%", height: "100%", minWidth: 0, minHeight: 0 },
+    h("Row", { width: "100%", alignItems: "center", gap: 8, shrink: 0 },
+      text(dynamicFilterOpen ? "筛选用户" : summary, { key: "dynamic-filter-summary", fontSize: 12,
+        textColor: "textMuted", grow: 1, minWidth: 0, singleLine: true }),
+      h("ButtonBase", { key: "dynamic-filter-toggle", height: 28, paddingX: 10, paddingY: 0, radius: 14,
+        background: "surfaceHover", hover: { background: "surfacePressed" }, focusRing: true, shrink: 0,
+        label: dynamicFilterOpen ? "返回动态" : "筛选用户", ...pressStyle(),
+        onClick: () => { dynamicFilterOpen = !dynamicFilterOpen; $metrix.invalidate(); } },
+        text(dynamicFilterOpen ? "返回动态" : "筛选", { fontSize: 12 }))),
+    dynamicFilterOpen
+      ? h("Scroll", { key: "dynamic-filter-scroll", width: "100%", grow: 1, minHeight: 0 },
+        h("Column", { width: "100%", paddingRight: 16 }, DynamicFilters()))
+      : h("Scroll", { key: "scroll-dynamic", width: "100%", grow: 1, minHeight: 0 },
+        h("Column", { gap: 0, width: "100%", minWidth: 0, paddingRight: 16 },
+          sectionError("dynamic"),
+          dynamics === null ? note(dynamicInflight || loading ? "正在读取动态…" : "动态尚不可用，请刷新。", { wrap: true, paddingY: 16 })
+            : !items.length ? note(dynamicFilter.mode === "include" && !selected.size ? "请选择要查看的用户。"
+              : dynamics.items.length ? "已加载动态中没有匹配内容，可调整筛选或加载更多。" : "暂无可显示的动态。",
+              { key: "dynamic-empty", wrap: true, paddingY: 16 }) : null,
+          items.map((item, index) => h("Column", { key: "dynamic-row-" + item.id, gap: 0, width: "100%", minWidth: 0 },
+            h("ButtonBase", { key: "dynamic-item-" + item.id, width: "100%", minWidth: 0, paddingX: 0, paddingY: 10, radius: 8,
+              hover: { background: "surfaceHover" }, focusRing: true, ...pressStyle(),
+              label: item.name + "的动态，打开原文", onClick: launch("https://t.bilibili.com/" + item.id) },
+              h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "start" },
+                h("Avatar", { name: item.name, ...(item.avatar ? { src: item.avatar } : {}), width: 24, height: 24, radius: 12, shrink: 0 }),
+                h("Column", { gap: 5, grow: 1, minWidth: 0 },
+                  h("Row", { gap: 6, width: "100%", minWidth: 0, alignItems: "center" },
+                    text(item.name, { fontSize: 12, fontWeight: 500, grow: 1, minWidth: 0, singleLine: true,
+                      tooltip: item.name + " · UID " + item.uid }),
+                    note(stamp(item.at), { fontSize: 10, singleLine: true, shrink: 0 })),
+                  text(item.text, { key: "dynamic-text-" + item.id, fontSize: 13, wrap: true, maxLines: 3, width: "100%", minWidth: 0 })))),
+            index < items.length - 1 ? h("Box", { height: 1, width: "100%", background: "border" }) : null)))),
+    !dynamicFilterOpen && dynamics ? h("Row", { width: "100%", gap: 8, alignItems: "center", shrink: 0 },
+      note("已加载 " + dynamics.items.length + " 条 · 显示 " + items.length + " 条", { key: "dynamic-count", fontSize: 11, grow: 1, minWidth: 0 }),
+      dynamics.hasMore && dynamics.items.length < 100 ? h("Button", { key: "dynamic-more", text: dynamicInflight ? "加载中…" : "加载更多",
+        disabled: !!dynamicInflight || loading, onClick: () => refreshDynamics(true) }) : null) : null,
+    !dynamicFilterOpen && dynamics?.items.length >= 100 ? note("已加载 100 条，刷新可查看最新动态。", { wrap: true, shrink: 0 }) : null);
+}
+function ConversationList() {
+  const dense = privateCardSize === "compact";
+  let items;
+  if (conversations === null) items = note(loading || privateInflight ? "正在读取私信会话…" : "私信会话尚不可用", { key: "conversations-pending" });
+  else if (!conversations.length) items = note("暂无用户私信会话", { key: "no-conversations", paddingY: 24, textAlign: "center" });
+  else items = conversations.map(row => {
+    const preview = text(row.preview, { key: "conversation-preview-" + row.uid, fontSize: 12, textColor: "textMuted",
+      maxLines: dense ? 1 : 2, wrap: !dense, singleLine: dense, minWidth: 0, tooltip: row.preview, ...(dense ? { grow: 1 } : {}) });
+    const time = note(stamp(row.at), { key: "conversation-time-" + row.uid, fontSize: dense ? 9 : 10, singleLine: true, shrink: 0 });
+    return h("ButtonBase", { key: "private-session-" + row.uid, width: "100%", minWidth: 0,
+      padding: dense ? 8 : 12, radius: 12, background: "surfaceHover", ...pressStyle(), hover: { background: "surfacePressed" }, focusRing: true,
+      label: row.name + "的私信会话", onClick: launch("https://message.bilibili.com/#/whisper/mid" + row.uid) },
+      h("Column", { width: "100%", minWidth: 0, gap: dense ? 4 : 8 },
+        h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "center" },
+          h("Avatar", { name: row.name, ...(row.avatar ? { src: row.avatar } : {}), width: dense ? 28 : 36, height: dense ? 28 : 36,
+            radius: dense ? 14 : 18, fit: "cover", shrink: 0, label: row.name + "的头像" }),
+          h("Column", { grow: 1, minWidth: 0, gap: dense ? 1 : 2 },
+            text(row.name, { key: "conversation-name-" + row.uid, fontSize: dense ? 12 : 13, fontWeight: 500, singleLine: true, tooltip: row.name }),
+            note("UID " + row.uid, { key: "conversation-uid-" + row.uid, fontSize: dense ? 9 : 10, singleLine: true })),
+          row.unread ? text(comma(row.unread), { key: "conversation-unread-" + row.uid, fontSize: 11, fontWeight: 600,
+            paddingX: 6, height: 20, radius: 10, background: "accentSubtle", textColor: "accent", shrink: 0,
+            label: comma(row.unread) + "条未读私信" }) : null),
+        dense ? h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "center" }, preview, time) : [preview, time]));
+  });
+  return h("Column", { key: "private-conversations", width: "100%", minWidth: 0, gap: dense ? 4 : 8 },
+    h("Row", { width: "100%", gap: 8, alignItems: "center", tooltip: "会话更新：" + stamp(times.conversations) },
+      text("最近私信", { fontSize: 12, fontWeight: 500, grow: 1 }),
+      note("未读"), text(comma(privateMessages?.total), { key: "private-total", fontSize: 12, fontFeatures: "tnum" })),
+    sectionError("conversations"), items);
+}
+function Messages() {
+  const n = notifications, root = "https://message.bilibili.com/#/";
+  const list = privateEnabled() && privateDisplay === "list";
+  const message = (label, value, key, path, tooltip) => tile(label, comma(value), key, { onClick: launch(root + path), tooltip });
+  const cards = [
+    privateEnabled() && !list ? message("未读私信", privateMessages?.total, "private-total", "whisper",
+      "已关注 " + comma(privateMessages?.followed) + " · 未关注 " + comma(privateMessages?.unfollowed) + " · 拦截 " + comma(privateMessages?.intercepted)
+        + "（拦截单列）\n更新：" + stamp(times.private) + " · 每 " + PRIVATE_RATES[privateRate].label) : null,
+    features.message_likes ? message("收到的赞", n?.likes, "notice-likes", "love") : null,
+    features.message_replies ? message("回复我的", n?.reply, "notice-reply", "reply") : null,
+    features.message_mentions ? message("@ 我的", n?.at, "notice-at", "at") : null,
+    features.message_system ? message("系统通知", n?.system, "notice-system", "system") : null,
+    features.message_assistant ? message("UP 主助手", n?.assistant, "notice-assistant", "up") : null,
+  ].filter(Boolean);
+  // Native scrollbars overlay the viewport; keep message content clear of the trailing rail.
+  return h("Column", { gap: 8, width: "100%", minWidth: 0, paddingRight: 16 }, privateEnabled() ? sectionError("private") : null,
+    notificationsEnabled() ? sectionError("notifications") : null,
+    list ? ConversationList() : null,
+    list && cards.length ? note("其他通知", { fontWeight: 500 }) : null,
+    cards.length ? h("Grid", { key: "message-cards", columns: Math.min(2, cards.length), gap: 8, width: "100%" }, cards) : null,
+    features.message_replies && features.message_mentions && n && n.reply === null && n.at === null && n.combined !== null
+      ? note("回复及 @ 合并计数：" + comma(n.combined), { key: "notice-combined" }) : null);
+}
+function IdentityHeader(now) {
+  return h("Row", { width: "100%", alignItems: "center", gap: 12, shrink: 0 },
+    h("ButtonBase", { key: "login-start", width: 40, height: 40, padding: 0, radius: 20,
+      background: "accentSubtle", alignItems: "center", justify: "center", onClick: () => startLogin(),
+      label: "重新扫码登录", tooltip: "重新扫码登录", ...pressStyle(), focusRing: true },
+      h("Avatar", { key: "account-avatar", name: account.name, ...(account.avatar ? { src: account.avatar } : {}),
+        width: 40, height: 40, radius: 20, fit: "cover", label: account.name + "的头像" })),
+    text(account.name, { key: "account-name", fontSize: 16, fontWeight: 500, grow: 1, minWidth: 0,
+      singleLine: true, tooltip: account.name, onClick: launch("https://space.bilibili.com/" + account.uid) }),
+    RefreshButton(now));
+}
+function RefreshButton(now) {
+  return h("ButtonBase", { key: "refresh", height: 32, paddingX: 10, paddingY: 0, radius: 16,
+    background: "surfaceHover", disabled: loading || !!inputError, onClick: () => requestRefresh(),
+    label: loading ? "正在刷新" : "刷新", tooltip: loading ? "正在刷新" : "刷新", shrink: 0,
+    hover: { background: "surfacePressed" }, focusRing: true, ...pressStyle("refresh") },
+    h("Row", { gap: 6, alignItems: "center" },
+      h("Icon", { key: "refresh-icon", svg: REFRESH_ICON, width: 16, height: 16, fontSize: 16,
+        rotate: refreshAngle(now), transformOrigin: [0.5, 0.5] }), text("刷新", { fontSize: 13, fontWeight: 500 })));
+}
+function pageMenu() {
+  return tabs.filter(item => item.id !== "account" || features.identity || features.followers || features.level)
+    .map(item => ({ label: item.label, checked: tab === item.id, onClick: () => selectTab(item.id) }));
+}
+function Navigation(width, now) {
+  const pill = h("Box", { key: "tab-pill", width: (width - 6) / tabs.length, height: 28,
+    radius: 14, background: "surface", translate: [pillPosition(now) * (width - 6) / tabs.length, 0],
+    shadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#0000000a" }, ignoreInput: true });
+  const buttons = tabs.map((item, i) => h("Part", { key: "tab-" + item.id, name: "tab", index: i,
+    grow: 1, basis: 0, height: 28, padding: 0, radius: 14, alignItems: "center", justify: "center", textColor: tab === item.id ? "text" : "textMuted",
+    focusRing: true, ...pressStyle() }, text(item.label, { fontSize: 13, fontWeight: 500 })));
+  const controls = h("TabsBase", { key: "navigation", value: tabIndex(), onChange: selectTab,
+    rowStart: 1, columnStart: 1, width: "100%" },
+    h("Part", { name: "list", padding: 3, height: 34, width: "100%" }, buttons));
+  return h("Grid", { columns: 1, width: "100%", radius: 17, background: "surfaceHover" },
+    h("Row", { rowStart: 1, columnStart: 1, height: 34, padding: 3, width: "100%", ignoreInput: true }, pill), controls);
+}
+function Pages(now) {
+  const visuals = pageVisuals(now), active = tabIndex();
+  return h("Grid", { key: "pages", columns: 1, rowTracks: [{ fr: 1 }], grow: 1, minHeight: 0, width: "100%", clip: true },
+    ...tabs.map((item, i) => h("Column", { key: "page-" + item.id, rowStart: 1, columnStart: 1,
+      width: "100%", height: "100%", minHeight: 0, opacity: visuals[i].opacity, blur: visuals[i].blur,
+      translate: [visuals[i].x, 0], hidden: i !== active && (!tabMotion || visuals[i].opacity === 0), ignoreInput: i !== active },
+      item.id === "dynamic" ? Dynamics() : h("Scroll", { key: "scroll-" + item.id, width: "100%", grow: 1, minHeight: 0 },
+        item.id === "account" ? Account(now) : item.id === "videos" ? Videos() : Messages()))));
+}
+function LoginPanel(width) {
+  const busy = login.phase === "generating" || login.phase === "saving";
+  const active = login.phase === "waiting" || login.phase === "scanned";
+  const retry = login.phase === "expired" || login.phase === "error";
+  const problem = login.phase === "idle" ? errors.account || (credential && inputError) : "";
+  const message = login.phase === "idle" ? problem || "使用手机 App 扫码登录" : login.message;
+  const action = busy ? login.phase === "saving" ? "正在连接…" : "生成中…" : active || retry ? "重新生成" : "扫码登录";
+  const qrSize = Math.min(212, width);
+  return h("Column", { gap: 12, width: "100%", minWidth: 0, alignItems: "center" },
+    login.svg ? h("Image", { key: "login-qr", svg: login.svg, width: qrSize, height: qrSize,
+      radius: 12, background: "#ffffff", border: [1, "border"], textColor: "#000000", label: "哔哩哔哩登录二维码",
+      ...(motionAllowed() ? { keyframes: { ...LOGIN_REVEAL, run: loginVersion } } : {}) }) : null,
+    h("Row", { gap: 8, width: "100%", alignItems: "center", justify: "center" },
+      busy ? h("Loading", { key: "login-loading", size: 16, color: "textMuted", label: "登录处理中", shrink: 0 }) : null,
+      text(message, { key: "login-status", fontSize: 13, lineHeight: 1.375, minWidth: 0, shrink: 1,
+        wrap: true, textAlign: "center", textColor: retry || problem ? "warning" : busy ? "textMuted" : "text" })),
+    h("Row", { gap: 8, width: "100%", justify: "center" },
+      login.phase !== "idle" ? h("ButtonBase", { key: "login-cancel", height: 32, paddingX: 14, paddingY: 0,
+        radius: 16, background: "surface", disabled: login.phase === "saving",
+        onClick: () => cancelLogin(), label: account ? "返回账户" : "取消", focusRing: true,
+        hover: { background: "surfaceHover" }, ...pressStyle() },
+        text(account ? "返回账户" : "取消", { fontSize: 13, textColor: "textMuted" })) : null,
+      h("ButtonBase", { key: active ? "login-regenerate" : "login-start", height: 32, paddingX: 14, paddingY: 0,
+        ...(active ? {} : { grow: 1, basis: 0 }), radius: 16, background: active ? "surface" : "text", disabled: busy,
+        onClick: () => startLogin(), label: action, focusRing: true,
+        hover: active ? { background: "surfaceHover" } : { opacity: 0.88 }, ...pressStyle() },
+        text(action, { fontSize: 13, fontWeight: active ? 400 : 500, textColor: active ? "textMuted" : "surface" }))),
+    problem && times.account ? note("上次成功：" + stamp(times.account)) : null);
+}
+function panel(env) {
+  const now = Date.now(), connected = account && login.phase === "idle" && !inputError;
+  const width = Math.max(200, Math.min(320, env.viewport?.width || 320)) - 32;
+  const compactAccount = tabs.length === 1 && tabs[0].id === "account" && !features.followers;
+  const connectedHeight = tab === "dynamic" ? 440 : compactAccount ? (features.level ? 280 : 208) : 400;
+  const contextMenu = [{ label: "重新扫码登录", onClick: () => startLogin() },
+    { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") }];
+  const identity = account ? `${account.uid}:${account.level}:${account.xp}` : "";
+  if (identity !== barIdentity) {
+    barIdentity = identity;
+    if (connected && motionAllowed()) { barStarted = now; wakeMotion(); }
+  }
+  const loginHeight = login.svg ? 432
+    : login.phase === "error" || login.phase === "expired" || (credential && inputError) ? 240 : 208;
+  return h("Column", { preferredWidth: 320, preferredHeight: connected ? connectedHeight : loginHeight, safeArea: true,
+    width: "100%", height: "100%", maxWidth: 320, minHeight: 0, minWidth: 0,
+    padding: 16, gap: 12, radius: 24, background: "surface", textColor: "text", fontSize: 13,
+    contextMenu, shortcuts: { "CmdOrCtrl+R": () => requestRefresh() } },
+    connected ? IdentityHeader(now) : h("Row", { gap: 12, alignItems: "center", width: "100%" },
+      h("Box", { width: 40, height: 40, radius: 20, background: "accentSubtle", alignItems: "center", justify: "center" },
+        h("Icon", { svg: MARK, width: 22, height: 22, fontSize: 22, textColor: "accent" })),
+      h("Column", { gap: 0, grow: 1, minWidth: 0 },
+        text("哔哩哔哩", { fontSize: 16, fontWeight: 500 }), note(account ? "切换账户" : "账户登录"))),
+    connected && tabs.length > 1 ? Navigation(width, now) : null,
+    connected ? sectionError("account") : null,
+    connected ? Pages(now) : h("Scroll", { grow: 1, minHeight: 0, width: "100%" },
+      login.phase !== "idle" || inputError || errors.account ? LoginPanel(width)
+        : h("Column", { gap: 12, padding: 12, radius: 12, background: "surfaceHover", width: "100%", alignItems: "center" },
+          h("Loading", { size: 24, label: "读取账户" }), note("正在读取账户…"))),
+    h("Box", { height: 1, width: "100%", linearGradient: { stops: [
+      { at: 0, color: "surface" }, { at: 0.2, color: "border" }, { at: 0.8, color: "border" }, { at: 1, color: "surface" }] } }),
+    connected ? note("整体每 6 小时" + (privateEnabled() ? " · 私信每 " + PRIVATE_RATES[privateRate].label : ""), { singleLine: true,
+      tooltip: ["账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
+        features.videos ? "视频 " + stamp(times.videos) : null,
+        features.dynamic ? "动态 " + stamp(times.dynamic) : null,
+        privateEnabled() ? "私信 " + stamp(times.private) : null,
+        privateEnabled() && privateDisplay === "list" ? "会话 " + stamp(times.conversations) : null,
+        notificationsEnabled() ? "通知 " + stamp(times.notifications) : null].filter(Boolean).join(" · ") })
+      : note("登录信息保存在本机", { width: "100%" }));
+}
+export default {
+  async scheduled(env) { sync(env); await refresh(); },
+  render(env) {
+    sync(env);
+    const delta = followers?.delta;
+    const pages = pageMenu();
+    const title = features.followers && followers ? "粉丝 " + comma(followers.count) + (delta ? " (" + signed(delta) + ")" : "") : account?.name || "哔哩哔哩";
+    return { tray: { icon: "data:image/svg+xml," + encodeURIComponent(MARK), iconTemplate: true, title,
+      tooltip: account ? account.name + (features.identity ? " · UID " + account.uid : "") : "连接自己的 B 站账户",
+      error: inputError || Object.values(errors).join("；"),
+      menu: [{ label: "刷新", disabled: loading || !!inputError, onClick: () => requestRefresh() },
+        { label: "扫码登录", onClick: () => startLogin() },
+        pages.length ? { label: "页面", items: pages } : null,
+        privateEnabled() ? { label: "打开私信", onClick: launch("https://message.bilibili.com/#/whisper") } : null].filter(Boolean) }, panel: panel(env) };
+  },
+  async event(name, payload) {
+    if (name === "login") {
+      await startLogin();
+      await $metrix.panel.open();
+    }
+    if (name === "lifecycle" && payload?.type === "start") {
+      startMotion();
+      if (!privateLive) privateAttemptAt = Date.now();
+      privateLive = true;
+      armPrivateRefresh();
+    }
+    if (name === "lifecycle" && payload?.type === "stop") {
+      generation++;
+      refreshController?.abort();
+      cancelDynamicRefresh();
+      privateLive = false;
+      cancelPrivateRefresh();
+      uiLive = false;
+      stopMotion();
+      reducedQuery?.removeEventListener("change", motionPreferenceChanged);
+      reducedQuery = null;
+      cancelLogin(false);
+    }
+  },
+};
+  ]]></script>
+</bar>

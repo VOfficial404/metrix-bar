@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.10.0" category="social" icon="tv"
+     version="1.11.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -999,10 +999,10 @@ function DynamicFilters() {
   const candidates = [...authors.values()].filter(author => dynamicFilter.uids.includes(author.uid)
     || !search || author.uid.includes(search) || author.name.toLowerCase().includes(search));
   return h("Column", { gap: 8, width: "100%" },
-    h("Select", { key: "dynamic-filter-mode", label: "动态用户筛选", value: dynamicFilter.mode,
+    h("Select", { key: "dynamic-filter-mode", label: "动态用户筛选", value: dynamicFilter.mode, width: "100%",
       items: [{ label: "全部用户", value: "all" }, { label: "只看选中用户", value: "include" }, { label: "屏蔽选中用户", value: "exclude" }],
       onChange: mode => saveDynamicFilter({ ...dynamicFilter, mode }) }),
-    note("候选用户来自已加载动态，也可直接添加 UID。筛选按发布者生效。", { wrap: true }),
+    note("按发布者筛选，也可直接添加 UID。", { wrap: true }),
     h("SearchField", { key: "dynamic-author-search", value: dynamicSearch, placeholder: "搜索昵称或 UID", width: "100%",
       onChange: value => { dynamicSearch = String(value); $metrix.invalidate(); } }),
     h("Row", { gap: 6, width: "100%", alignItems: "center" },
@@ -1021,32 +1021,45 @@ function Dynamics() {
   const selected = new Set(dynamicFilter.uids);
   const items = (dynamics?.items || []).filter(item => dynamicFilter.mode === "all"
     || (dynamicFilter.mode === "include" ? selected.has(item.uid) : !selected.has(item.uid)));
-  return h("Column", { gap: 8, width: "100%", minWidth: 0, paddingRight: 16 },
-    h("Row", { width: "100%", alignItems: "center", gap: 6 },
-      text("动态", { fontWeight: 600, grow: 1 }),
-      h("Button", { key: "dynamic-filter-toggle", text: dynamicFilterOpen ? "收起筛选" : "筛选用户",
-        onClick: () => { dynamicFilterOpen = !dynamicFilterOpen; $metrix.invalidate(); } })),
-    note((dynamicFilter.mode === "all" ? "全部用户" : dynamicFilter.mode === "include" ? "只看选中用户" : "屏蔽选中用户")
-      + (dynamicFilter.mode === "all" ? "" : " · " + selected.size + " 位"), { key: "dynamic-filter-summary" }),
-    dynamicFilterOpen ? DynamicFilters() : null,
-    sectionError("dynamic"),
-    dynamics === null ? note(dynamicInflight || loading ? "正在读取动态…" : "动态尚不可用，请刷新。", { wrap: true })
-      : !items.length ? note(dynamicFilter.mode === "include" && !selected.size ? "请选择要查看的用户。"
-        : dynamics.items.length ? "已加载动态中没有匹配内容，可调整筛选或加载更多。" : "暂无可显示的动态。", { key: "dynamic-empty", wrap: true }) : null,
-    items.map(item => h("ButtonBase", { key: "dynamic-item-" + item.id, width: "100%", minWidth: 0, padding: 10, radius: 12,
-      background: "surfaceHover", hover: { background: "surfacePressed" }, focusRing: true, ...pressStyle(),
-      label: item.name + "的动态", onClick: launch("https://t.bilibili.com/" + item.id) },
-      h("Column", { gap: 6, width: "100%", minWidth: 0 },
-        h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "center" },
-          h("Avatar", { name: item.name, ...(item.avatar ? { src: item.avatar } : {}), width: 28, height: 28, radius: 14, shrink: 0 }),
-          h("Column", { gap: 2, grow: 1, minWidth: 0 }, text(item.name, { fontSize: 13, singleLine: true, tooltip: "UID " + item.uid }),
-            note(stamp(item.at), { fontSize: 10, singleLine: true }))),
-        text(item.text, { key: "dynamic-text-" + item.id, fontSize: 12, wrap: true, maxLines: 5, minWidth: 0 }),
-        note("查看原文", { fontSize: 10 })))),
-    dynamics ? note("已加载 " + dynamics.items.length + " 条 · 显示 " + items.length + " 条", { key: "dynamic-count" }) : null,
-    dynamics?.hasMore && dynamics.items.length < 100 ? h("Button", { key: "dynamic-more", text: dynamicInflight ? "正在加载…" : "加载更多",
-      disabled: !!dynamicInflight || loading, onClick: () => refreshDynamics(true) }) : null,
-    dynamics?.items.length >= 100 ? note("已加载 100 条，刷新可查看最新动态。", { wrap: true }) : null);
+  const summary = (dynamicFilter.mode === "all" ? "全部用户" : dynamicFilter.mode === "include" ? "只看选中用户" : "屏蔽选中用户")
+    + (dynamicFilter.mode === "all" ? "" : " · " + selected.size + " 位");
+  return h("Column", { gap: 8, width: "100%", height: "100%", minWidth: 0, minHeight: 0 },
+    h("Row", { width: "100%", alignItems: "center", gap: 8, shrink: 0 },
+      text(dynamicFilterOpen ? "筛选用户" : summary, { key: "dynamic-filter-summary", fontSize: 12,
+        textColor: "textMuted", grow: 1, minWidth: 0, singleLine: true }),
+      h("ButtonBase", { key: "dynamic-filter-toggle", height: 28, paddingX: 10, paddingY: 0, radius: 14,
+        background: "surfaceHover", hover: { background: "surfacePressed" }, focusRing: true, shrink: 0,
+        label: dynamicFilterOpen ? "返回动态" : "筛选用户", ...pressStyle(),
+        onClick: () => { dynamicFilterOpen = !dynamicFilterOpen; $metrix.invalidate(); } },
+        text(dynamicFilterOpen ? "返回动态" : "筛选", { fontSize: 12 }))),
+    dynamicFilterOpen
+      ? h("Scroll", { key: "dynamic-filter-scroll", width: "100%", grow: 1, minHeight: 0 },
+        h("Column", { width: "100%", paddingRight: 16 }, DynamicFilters()))
+      : h("Scroll", { key: "scroll-dynamic", width: "100%", grow: 1, minHeight: 0 },
+        h("Column", { gap: 0, width: "100%", minWidth: 0, paddingRight: 16 },
+          sectionError("dynamic"),
+          dynamics === null ? note(dynamicInflight || loading ? "正在读取动态…" : "动态尚不可用，请刷新。", { wrap: true, paddingY: 16 })
+            : !items.length ? note(dynamicFilter.mode === "include" && !selected.size ? "请选择要查看的用户。"
+              : dynamics.items.length ? "已加载动态中没有匹配内容，可调整筛选或加载更多。" : "暂无可显示的动态。",
+              { key: "dynamic-empty", wrap: true, paddingY: 16 }) : null,
+          items.map((item, index) => h("Column", { key: "dynamic-row-" + item.id, gap: 0, width: "100%", minWidth: 0 },
+            h("ButtonBase", { key: "dynamic-item-" + item.id, width: "100%", minWidth: 0, paddingX: 0, paddingY: 10, radius: 8,
+              hover: { background: "surfaceHover" }, focusRing: true, ...pressStyle(),
+              label: item.name + "的动态，打开原文", onClick: launch("https://t.bilibili.com/" + item.id) },
+              h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "start" },
+                h("Avatar", { name: item.name, ...(item.avatar ? { src: item.avatar } : {}), width: 24, height: 24, radius: 12, shrink: 0 }),
+                h("Column", { gap: 5, grow: 1, minWidth: 0 },
+                  h("Row", { gap: 6, width: "100%", minWidth: 0, alignItems: "center" },
+                    text(item.name, { fontSize: 12, fontWeight: 500, grow: 1, minWidth: 0, singleLine: true,
+                      tooltip: item.name + " · UID " + item.uid }),
+                    note(stamp(item.at), { fontSize: 10, singleLine: true, shrink: 0 })),
+                  text(item.text, { key: "dynamic-text-" + item.id, fontSize: 13, wrap: true, maxLines: 3, width: "100%", minWidth: 0 })))),
+            index < items.length - 1 ? h("Box", { height: 1, width: "100%", background: "border" }) : null)))),
+    !dynamicFilterOpen && dynamics ? h("Row", { width: "100%", gap: 8, alignItems: "center", shrink: 0 },
+      note("已加载 " + dynamics.items.length + " 条 · 显示 " + items.length + " 条", { key: "dynamic-count", fontSize: 11, grow: 1, minWidth: 0 }),
+      dynamics.hasMore && dynamics.items.length < 100 ? h("Button", { key: "dynamic-more", text: dynamicInflight ? "加载中…" : "加载更多",
+        disabled: !!dynamicInflight || loading, onClick: () => refreshDynamics(true) }) : null) : null,
+    !dynamicFilterOpen && dynamics?.items.length >= 100 ? note("已加载 100 条，刷新可查看最新动态。", { wrap: true, shrink: 0 }) : null);
 }
 function ConversationList() {
   const dense = privateCardSize === "compact";
@@ -1144,8 +1157,8 @@ function Pages(now) {
     ...tabs.map((item, i) => h("Column", { key: "page-" + item.id, rowStart: 1, columnStart: 1,
       width: "100%", height: "100%", minHeight: 0, opacity: visuals[i].opacity, blur: visuals[i].blur,
       translate: [visuals[i].x, 0], hidden: i !== active && (!tabMotion || visuals[i].opacity === 0), ignoreInput: i !== active },
-      h("Scroll", { key: "scroll-" + item.id, width: "100%", grow: 1, minHeight: 0 },
-        item.id === "account" ? Account(now) : item.id === "videos" ? Videos() : item.id === "dynamic" ? Dynamics() : Messages()))));
+      item.id === "dynamic" ? Dynamics() : h("Scroll", { key: "scroll-" + item.id, width: "100%", grow: 1, minHeight: 0 },
+        item.id === "account" ? Account(now) : item.id === "videos" ? Videos() : Messages()))));
 }
 function LoginPanel(width) {
   const busy = login.phase === "generating" || login.phase === "saving";
