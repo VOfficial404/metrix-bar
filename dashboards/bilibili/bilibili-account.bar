@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.14.0" category="social" icon="tv"
+     version="1.14.1" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -202,7 +202,7 @@ function hasUnreadMessages() {
     || (features.message_replies && features.message_mentions && n?.reply === null && n?.at === null && n?.combined > 0);
 }
 function UnreadDot(key) {
-  return h("Box", { key, width: 6, height: 6, radius: 3, background: "#E5484D", shrink: 0,
+  return h("Box", { key, width: 5, height: 5, radius: 2.5, background: "#E5484D", shrink: 0, translate: [0, -5],
     label: "有未读消息", tooltip: "有未读消息" });
 }
 const PRIVATE_RATES = {
@@ -1107,9 +1107,10 @@ function ConversationList() {
               grow: 1, minWidth: 0, singleLine: true, tooltip: row.name }), time),
           h("Row", { width: "100%", minWidth: 0, gap: 6, alignItems: "center" },
             h("Column", { grow: 1, minWidth: 0 }, preview),
-            row.unread ? text(comma(row.unread), { key: "conversation-unread-" + row.uid, fontSize: 10, fontWeight: 600,
-              paddingX: 5, height: 18, radius: 9, background: "#E5484D", textColor: "#FFFFFF", shrink: 0,
-              label: comma(row.unread) + "条未读私信" }) : null),
+            row.unread ? h("Row", { minWidth: 16, height: 16, paddingX: 4, radius: 8, background: "#E5484D",
+              alignItems: "center", justify: "center", shrink: 0, label: comma(row.unread) + "条未读私信" },
+              text(comma(row.unread), { key: "conversation-unread-" + row.uid, fontSize: 10, fontWeight: 500,
+                fontFeatures: "tnum", singleLine: true, textColor: "#FFFFFF" })) : null),
           note("UID " + row.uid, { key: "conversation-uid-" + row.uid, fontSize: 9, singleLine: true }))));
   });
   return h("Column", { key: "private-conversations", width: "100%", minWidth: 0, gap: dense ? 4 : 8 },
@@ -1141,7 +1142,7 @@ function Messages() {
   ].filter(Boolean);
   // Native scrollbars overlay the viewport; keep message content clear of the trailing rail.
   return h("Column", { gap: 10, width: "100%", minWidth: 0, paddingRight: 16 },
-    tabs.length === 1 ? h("Row", { gap: 6, alignItems: "center", width: "100%" },
+    tabs.length === 1 ? h("Row", { gap: 4, alignItems: "center", width: "100%" },
       text("消息", { fontSize: 13, fontWeight: 500 }), hasUnreadMessages() ? UnreadDot("message-page-unread") : null) : null,
     privateEnabled() ? sectionError("private") : null,
     notificationsEnabled() ? sectionError("notifications") : null,
@@ -1178,9 +1179,10 @@ function Navigation(width, now) {
     shadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#0000000a" }, ignoreInput: true });
   const buttons = tabs.map((item, i) => h("Part", { key: "tab-" + item.id, name: "tab", index: i,
     grow: 1, basis: 0, height: 28, padding: 0, radius: 14, alignItems: "center", justify: "center", textColor: tab === item.id ? "text" : "textMuted",
-    focusRing: true, ...pressStyle() }, h("Row", { gap: 4, alignItems: "center", justify: "center" },
+    focusRing: true, ...pressStyle() }, h("Row", { paddingLeft: 9, gap: 4, alignItems: "center", justify: "center" },
       text(item.label, { fontSize: 13, fontWeight: 500 }),
-      item.id === "messages" && hasUnreadMessages() ? UnreadDot("message-tab-unread") : null)));
+      h("Box", { width: 5, height: 16, shrink: 0, alignItems: "center", justify: "center" },
+        item.id === "messages" && hasUnreadMessages() ? UnreadDot("message-tab-unread") : null))));
   const controls = h("TabsBase", { key: "navigation", value: tabIndex(), onChange: selectTab,
     rowStart: 1, columnStart: 1, width: "100%" },
     h("Part", { name: "list", padding: 3, height: 34, width: "100%" }, buttons));
