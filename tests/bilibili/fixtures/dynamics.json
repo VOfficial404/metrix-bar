@@ -1,0 +1,28 @@
+{
+  "now": "2026-11-09T12:00:00Z",
+  "inputs": {
+    "show_dynamic": true,
+    "show_videos": false,
+    "show_messages": false,
+    "show_followers": false,
+    "show_level": false,
+    "show_identity": true
+  },
+  "secrets": {
+    "sessdata": "fixture-session"
+  },
+  "http": [
+    {
+      "url": "https://api.bilibili.com/x/web-interface/nav",
+      "body": "{\"code\":0,\"data\":{\"isLogin\":true,\"mid\":12345,\"uname\":\"合成动态账户\",\"money\":12,\"level_info\":{\"current_level\":5,\"current_exp\":20000,\"current_min\":10800,\"next_exp\":28800}}}"
+    },
+    {
+      "url": "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all?type=all",
+      "body": "{\"code\":0,\"data\":{\"items\":[{\"id_str\":\"90071992547409931\",\"type\":\"DYNAMIC_TYPE_WORD\",\"visible\":true,\"modules\":{\"module_author\":{\"mid\":71001,\"name\":\"合成作者小林\",\"face\":\"\",\"pub_ts\":1794222000},\"module_dynamic\":{\"desc\":{\"text\":\"合成动态：周末拍摄计划\"}}}},{\"id_str\":\"90071992547409932\",\"type\":\"DYNAMIC_TYPE_WORD\",\"visible\":true,\"modules\":{\"module_author\":{\"mid\":71002,\"name\":\"合成作者阿青\",\"face\":\"\",\"pub_ts\":1794222000},\"module_dynamic\":{\"desc\":{\"text\":\"合成动态：桌面改造记录\"}}}},{\"id_str\":\"90071992547409933\",\"type\":\"DYNAMIC_TYPE_WORD\",\"visible\":false,\"modules\":{\"module_author\":{\"mid\":71003,\"name\":\"合成隐藏作者\",\"face\":\"\",\"pub_ts\":1794222000},\"module_dynamic\":{\"desc\":{\"text\":\"不应出现的合成动态\"}}}}],\"offset\":\"synthetic-page-2\",\"has_more\":true}}"
+    },
+    {
+      "url": "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all?type=all&offset=synthetic-page-2",
+      "body": "{\"code\":0,\"data\":{\"items\":[{\"id_str\":\"90071992547409932\",\"type\":\"DYNAMIC_TYPE_WORD\",\"visible\":true,\"modules\":{\"module_author\":{\"mid\":71002,\"name\":\"合成作者阿青\",\"face\":\"\",\"pub_ts\":1794222000},\"module_dynamic\":{\"desc\":{\"text\":\"合成动态：桌面改造记录\"}}}},{\"id_str\":\"90071992547409934\",\"type\":\"DYNAMIC_TYPE_WORD\",\"visible\":true,\"modules\":{\"module_author\":{\"mid\":71001,\"name\":\"合成作者小林\",\"face\":\"\",\"pub_ts\":1794222000},\"module_dynamic\":{\"desc\":{\"text\":\"合成动态：更早的拍摄笔记\"}}}}],\"offset\":\"\",\"has_more\":false}}"
+    }
+  ]
+}

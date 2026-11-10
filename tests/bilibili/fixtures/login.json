@@ -1,5 +1,6 @@
 {
   "now": "2026-11-09T12:00:00Z",
+  "inputs": { "show_dynamic": false },
   "secrets": { "sessdata": "" },
   "http": [
     {

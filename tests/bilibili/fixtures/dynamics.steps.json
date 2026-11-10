@@ -1,0 +1,207 @@
+[
+  {
+    "action": "scheduled",
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409931"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409932"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409933"
+        },
+        "absent": true
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "navigation"
+    },
+    "handler": "onChange",
+    "args": [
+      "dynamic"
+    ],
+    "expect": [
+      {
+        "target": {
+          "key": "page-dynamic"
+        },
+        "props": {
+          "ignoreInput": false
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-text-90071992547409931"
+        },
+        "text": "合成动态：周末拍摄计划"
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-filter-toggle"
+    },
+    "handler": "onClick",
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-filter-mode"
+        },
+        "props": {
+          "value": "all"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-user-71001"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-user-71002"
+        }
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-filter-mode"
+    },
+    "handler": "onChange",
+    "args": [
+      "include"
+    ],
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409931"
+        },
+        "absent": true
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409932"
+        },
+        "absent": true
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-user-71001"
+    },
+    "handler": "onChange",
+    "args": [
+      true
+    ],
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409931"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409932"
+        },
+        "absent": true
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-more"
+    },
+    "handler": "onClick",
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409931"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409934"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409932"
+        },
+        "absent": true
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-filter-mode"
+    },
+    "handler": "onChange",
+    "args": [
+      "exclude"
+    ],
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409931"
+        },
+        "absent": true
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409934"
+        },
+        "absent": true
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409932"
+        }
+      }
+    ]
+  },
+  {
+    "action": "invoke",
+    "target": {
+      "key": "dynamic-filter-clear"
+    },
+    "handler": "onClick",
+    "expect": [
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409931"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409932"
+        }
+      },
+      {
+        "target": {
+          "key": "dynamic-item-90071992547409934"
+        }
+      },
+      {
+        "target": {
+          "key": "error-dynamic"
+        },
+        "absent": true
+      }
+    ]
+  }
+]

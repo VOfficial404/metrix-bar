@@ -1,6 +1,6 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.7.2" category="social" icon="tv"
-     description="查看 B 站账户、视频统计变化和私信会话；整体每 6 小时刷新，私信默认每 10 分钟刷新。"
+     version="1.8.0" category="social" icon="tv"
+     description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
   <permissions>
@@ -56,6 +56,7 @@
     <input name="show_message_mentions" type="bool" label="消息 · @ 我的" default="true" />
     <input name="show_message_system" type="bool" label="消息 · 系统通知" default="true" />
     <input name="show_message_assistant" type="bool" label="消息 · UP 主助手" default="true" />
+    <input name="show_dynamic" type="bool" label="动态 · 启用动态页" default="true" />
     <input name="sessdata" type="secret" label="高级 · SESSDATA（可选）"
            help="默认使用看板内扫码登录。" />
   </inputs>
@@ -120,7 +121,41 @@ let privateDisplay = "summary", privateLimit = 5, privateCardSize = "normal", co
 let times = {}, errors = {}, loading = false, inflight = null, inflightGeneration = -1, refreshController = null;
 let tab = "messages";
 // --stage-* maps to native background/text/textMuted/border/surface/accent/accentText.
-const TABS = [{ id: "messages", label: "消息" }, { id: "videos", label: "视频" }, { id: "account", label: "账户" }];
+const TABS = [{ id: "messages", label: "消息" }, { id: "videos", label: "视频" }, { id: "account", label: "账户" }, { id: "dynamic", label: "动态" }];
+let menuSettingsOpen = false, preferenceError = "";
+function readNavigation() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem("navigation:v1") || "null"); } catch {}
+  const ids = TABS.map(item => item.id);
+  return { order: [...new Set([...(Array.isArray(saved?.order) ? saved.order.filter(id => ids.includes(id)) : []), ...ids])],
+    hidden: Array.isArray(saved?.hidden) ? ids.filter(id => saved.hidden.includes(id)) : [], visible: saved?.visible !== false };
+}
+let navigation = readNavigation();
+function orderedTabs() { return navigation.order.map(id => TABS.find(item => item.id === id)); }
+function updateTabs(initial = false) {
+  tabs = orderedTabs().filter(item => !navigation.hidden.includes(item.id) && (item.id === "account"
+    ? features.identity || features.followers || features.level : item.id === "messages" ? messagesEnabled() : features[item.id]));
+  if (!tabs.length) tabs = [TABS.find(item => item.id === "account")];
+  if (initial || !tabs.some(item => item.id === tab)) tab = tabs[0].id;
+  stopMotion();
+}
+function saveNavigation(next) {
+  try { localStorage.setItem("navigation:v1", JSON.stringify(next)); }
+  catch { preferenceError = "菜单设置保存失败，请重试。"; $metrix.invalidate(); return; }
+  const changedVisibility = next.hidden.join() !== navigation.hidden.join();
+  navigation = next;
+  preferenceError = "";
+  sync(lastEnv);
+  updateTabs();
+  $metrix.invalidate();
+  if (changedVisibility) return refresh();
+}
+function moveMenu(id, direction) {
+  const order = [...navigation.order], from = order.indexOf(id), to = from + direction;
+  if (from < 0 || to < 0 || to >= order.length) return;
+  [order[from], order[to]] = [order[to], order[from]];
+  return saveNavigation({ ...navigation, order });
+}
 const VIDEO_STATS = [
   { option: "video_views", label: "播放", field: "views", api: "view" },
   { option: "video_likes", label: "点赞", field: "likes", api: "like" },
@@ -129,9 +164,47 @@ const VIDEO_STATS = [
   { option: "video_comments", label: "评论", field: "replies", api: "reply" },
 ];
 const NOTIFICATION_FEATURE_KEYS = ["message_likes", "message_replies", "message_mentions", "message_system", "message_assistant"];
-const FEATURE_KEYS = ["identity", "followers", "level", "videos", "messages", "video_cover", "video_date",
+const FEATURE_KEYS = ["identity", "followers", "level", "videos", "messages", "dynamic", "video_cover", "video_date",
   ...VIDEO_STATS.map(stat => stat.option), "message_private", ...NOTIFICATION_FEATURE_KEYS];
 let features = Object.fromEntries(FEATURE_KEYS.map(key => [key, true])), tabs = TABS;
+let dynamics = null, dynamicController = null, dynamicInflight = null;
+let dynamicFilterUID = null, dynamicFilter = { mode: "all", uids: [] };
+let dynamicFilterOpen = false, dynamicSearch = "", dynamicUIDDraft = "", dynamicFilterError = "";
+const validUID = value => typeof value === "string" && /^[1-9]\d{0,15}$/.test(value) && Number.isSafeInteger(Number(value));
+function restoreDynamicFilter(uid) {
+  if (dynamicFilterUID === uid) return;
+  cancelDynamicRefresh();
+  dynamics = null;
+  delete times.dynamic;
+  delete errors.dynamic;
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem("dynamic-filter:v1:" + uid) || "null"); } catch {}
+  dynamicFilterUID = uid;
+  dynamicFilter = { mode: ["all", "include", "exclude"].includes(saved?.mode) ? saved.mode : "all",
+    uids: Array.isArray(saved?.uids) ? [...new Set(saved.uids.filter(validUID))].slice(0, 100) : [] };
+  dynamicSearch = dynamicUIDDraft = dynamicFilterError = "";
+  dynamicFilterOpen = false;
+}
+function saveDynamicFilter(next) {
+  if (!account || dynamicFilterUID !== account.uid) return;
+  if (!["all", "include", "exclude"].includes(next.mode) || !next.uids.every(validUID)) return;
+  if (next.uids.length > 100) { dynamicFilterError = "最多选择 100 位用户。"; $metrix.invalidate(); return; }
+  try { localStorage.setItem("dynamic-filter:v1:" + account.uid, JSON.stringify(next)); }
+  catch { dynamicFilterError = "用户筛选保存失败，请重试。"; $metrix.invalidate(); return; }
+  dynamicFilter = next;
+  dynamicFilterError = "";
+  $metrix.invalidate();
+}
+function selectDynamicUser(uid, selected) {
+  saveDynamicFilter({ ...dynamicFilter, uids: selected ? [...new Set([...dynamicFilter.uids, uid])]
+    : dynamicFilter.uids.filter(value => value !== uid) });
+}
+function addDynamicUser() {
+  const uid = dynamicUIDDraft.trim();
+  if (!validUID(uid)) { dynamicFilterError = "请输入有效的数字 UID。"; $metrix.invalidate(); return; }
+  selectDynamicUser(uid, true);
+  if (!dynamicFilterError) dynamicUIDDraft = "";
+}
 const privateEnabled = () => features.messages && features.message_private;
 const notificationsEnabled = () => features.messages && NOTIFICATION_FEATURE_KEYS.some(key => features[key]);
 const messagesEnabled = () => privateEnabled() || notificationsEnabled();
@@ -371,14 +444,20 @@ function sync(env) {
   const requestedPrivateLimit = Number(env.inputs.private_count || "5");
   const nextPrivateLimit = [3, 5, 10].includes(requestedPrivateLimit) ? requestedPrivateLimit : 5;
   const nextFeatures = Object.fromEntries(FEATURE_KEYS.map(key => [key, env.inputs["show_" + key] !== false]));
+  for (const id of navigation.hidden) {
+    if (id === "account") for (const key of ["identity", "followers", "level"]) nextFeatures[key] = false;
+    else nextFeatures[id] = false;
+  }
   const featuresChanged = FEATURE_KEYS.some(key => nextFeatures[key] !== features[key]);
   if (initialized && next === credential && limit === videoLimit && rate === privateRate
       && display === privateDisplay && nextPrivateLimit === privateLimit && !featuresChanged) return;
   const changedAccount = !initialized || next !== credential;
+  const firstSync = !initialized;
   initialized = true;
   generation++;
   refreshController?.abort();
   cancelPrivateRefresh();
+  cancelDynamicRefresh();
   credential = next;
   videoLimit = [3, 5, 10].includes(limit) ? limit : 5;
   if (rate !== privateRate) privateAttemptAt = Date.now();
@@ -386,15 +465,16 @@ function sync(env) {
   privateDisplay = display;
   privateLimit = nextPrivateLimit;
   features = nextFeatures;
-  tabs = TABS.filter(item => item.id === "account" ? features.identity || features.followers || features.level
-    : item.id === "messages" ? messagesEnabled() : features[item.id]);
-  if (!tabs.length) tabs = [TABS.find(item => item.id === "account")];
-  if (!tabs.some(item => item.id === tab)) tab = tabs[0].id;
-  stopMotion();
+  updateTabs(firstSync);
   inputError = !next ? "扫码登录以连接自己的 B 站账户。"
     : /[\s;\r\n]/.test(next) || /^SESSDATA=/i.test(next) ? "只填写 SESSDATA 的值，不要填写整段 Cookie。" : "";
   if (changedAccount) {
     account = followers = videos = privateMessages = notifications = conversations = null;
+    dynamics = null;
+    dynamicFilterUID = null;
+    dynamicFilter = { mode: "all", uids: [] };
+    dynamicSearch = dynamicUIDDraft = dynamicFilterError = "";
+    dynamicFilterOpen = false;
     times = {};
     errors = {};
     privateAttemptAt = 0;
@@ -424,6 +504,11 @@ function sync(env) {
     notifications = null;
     delete times.notifications;
     delete errors.notifications;
+  }
+  if (!features.dynamic) {
+    dynamics = null;
+    delete times.dynamic;
+    delete errors.dynamic;
   }
   armPrivateRefresh();
 }
@@ -492,6 +577,80 @@ function readNotifications(data) {
     system: value("sys_msg"), assistant: value("up"), coins: value("coin"), favorites: value("favorite") };
   if (Object.values(result).every(v => v === null)) invalid();
   return result;
+}
+function dynamicExcerpt(item, forwarded = false) {
+  const content = item?.modules?.module_dynamic;
+  if (!content) return "动态内容暂不可用，请打开原文查看。";
+  const major = content.major;
+  if (major?.type === "MAJOR_TYPE_NONE") return "原动态已失效";
+  const parts = [content.desc?.text, major?.archive?.title, major?.opus?.title, major?.opus?.summary?.text,
+    major?.article?.title, major?.common?.title, major?.music?.title, major?.pgc?.title];
+  if (!forwarded && item.type === "DYNAMIC_TYPE_FORWARD") {
+    const author = item.orig?.modules?.module_author?.name;
+    parts.push(item.orig ? "转发" + (typeof author === "string" ? " @" + author : "") + "：" + dynamicExcerpt(item.orig, true) : "原动态已失效");
+  }
+  return [...new Set(parts.filter(value => typeof value === "string" && value.trim()).map(value => value.trim()))].join("\n").slice(0, 600)
+    || (major?.type === "MAJOR_TYPE_DRAW" ? "图片动态，请打开原文查看。" : "此类动态请打开原文查看。");
+}
+function readDynamics(data) {
+  if (!Array.isArray(data.items) || typeof data.has_more !== "boolean"
+      || (data.has_more && (typeof data.offset !== "string" || !data.offset || data.offset.length > 256))) invalid();
+  const seen = new Set(), items = [];
+  for (const item of data.items) {
+    if (item?.visible === false) continue;
+    const author = item?.modules?.module_author;
+    if (typeof item?.id_str !== "string" || !/^[1-9]\d{0,31}$/.test(item.id_str) || !author
+        || !count(author.mid) || !author.mid || typeof author.name !== "string" || !count(author.pub_ts)
+        || !Number.isSafeInteger(author.pub_ts * 1000) || !item.modules.module_dynamic) invalid();
+    if (seen.has(item.id_str)) continue;
+    seen.add(item.id_str);
+    items.push({ id: item.id_str, uid: String(author.mid), name: author.name.trim() || "UID " + author.mid,
+      avatar: imageURL(author.face), at: author.pub_ts * 1000, text: dynamicExcerpt(item) });
+  }
+  return { items, hasMore: data.has_more, offset: data.has_more ? data.offset : "" };
+}
+function cancelDynamicRefresh() {
+  dynamicController?.abort();
+  dynamicController = dynamicInflight = null;
+}
+function refreshDynamics(more = false, parentSignal) {
+  if (inputError || !features.dynamic || !account || parentSignal?.aborted) return Promise.resolve();
+  if (dynamicInflight) {
+    if (more) return dynamicInflight;
+    cancelDynamicRefresh();
+  }
+  if (more && (!dynamics?.hasMore || dynamics.items.length >= 100)) return Promise.resolve();
+  const version = generation, uid = account.uid, session = credential, prior = more ? dynamics : null;
+  const controller = new AbortController(), cancel = () => controller.abort();
+  const timeout = setTimeout(cancel, 8000);
+  parentSignal?.addEventListener("abort", cancel, { once: true });
+  dynamicController = controller;
+  const current = () => version === generation && account?.uid === uid && dynamicController === controller && features.dynamic;
+  const query = new URLSearchParams({ type: "all" });
+  if (prior) query.set("offset", prior.offset);
+  const task = (async () => {
+    try {
+      const data = await get(API, "/x/polymer/web-dynamic/v1/feed/all?" + query, session, controller.signal);
+      if (!current()) return;
+      if (controller.signal.aborted) throw new RequestError("动态读取已取消或超时，请重试。");
+      const next = readDynamics(data);
+      if (prior && next.hasMore && (next.offset === prior.offset || prior.cursors.includes(next.offset))) invalid();
+      const items = prior ? [...prior.items] : [], seen = new Set(items.map(item => item.id));
+      for (const item of next.items) if (!seen.has(item.id) && items.length < 100) { seen.add(item.id); items.push(item); }
+      dynamics = { ...next, items, cursors: prior ? [...prior.cursors, prior.offset] : [] };
+      times.dynamic = Date.now();
+      delete errors.dynamic;
+    } catch (error) { if (current()) errors.dynamic = safeError(error); }
+    finally {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", cancel);
+      if (dynamicController === controller) { dynamicController = null; dynamicInflight = null; }
+      $metrix.invalidate();
+    }
+  })();
+  dynamicInflight = task;
+  $metrix.invalidate();
+  return task;
 }
 function conversationPreview(message) {
   if (!message) return "暂无消息内容";
@@ -652,6 +811,7 @@ async function load(session, limit, version, signal) {
   account = next;
   times.account = Date.now();
   delete errors.account;
+  restoreDynamicFilter(next.uid);
   // Restore the previous sample only after confirming the logged-in UID.
   if (features.followers && !followers) {
     try {
@@ -680,6 +840,7 @@ async function load(session, limit, version, signal) {
   results.forEach((result, i) => {
     if (result.status === "rejected") errors[tasks[i][0]] = safeError(result.reason);
   });
+  const dynamicRefresh = features.dynamic ? refreshDynamics(false, signal) : Promise.resolve();
   if (features.videos) try {
     const result = await loadVideos(next.uid, session, signal, limit);
     if (version !== generation) return;
@@ -687,6 +848,7 @@ async function load(session, limit, version, signal) {
     times.videos = Date.now();
     delete errors.videos;
   } catch (error) { if (version === generation) errors.videos = safeError(error); }
+  await dynamicRefresh;
 }
 function safeError(error) {
   return error instanceof RequestError ? error.message : "数据更新失败，请稍后手动刷新。";
@@ -694,6 +856,7 @@ function safeError(error) {
 function refresh() {
   if (inputError) return Promise.resolve();
   if (inflight) return inflightGeneration === generation ? inflight : inflight.then(() => refresh());
+  cancelDynamicRefresh();
   const session = credential, version = generation, controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
   refreshController = controller;
@@ -734,6 +897,7 @@ function armPrivateRefresh() {
 function refreshPrivate(session = credential, version = generation, parentSignal) {
   if (version !== generation || inputError || !privateEnabled() || !account || parentSignal?.aborted) return Promise.resolve();
   if (privateInflight) return privateInflight;
+  if (!parentSignal && inflight) return inflight;
   clearTimeout(privateTimer);
   privateTimer = null;
   const controller = new AbortController(), cancel = () => controller.abort();
@@ -842,6 +1006,62 @@ function Videos() {
   });
   return h("Column", { gap: 8, width: "100%" }, sectionError("videos"), items);
 }
+function DynamicFilters() {
+  const authors = new Map((dynamics?.items || []).map(item => [item.uid, { uid: item.uid, name: item.name }]));
+  for (const uid of dynamicFilter.uids) if (!authors.has(uid)) authors.set(uid, { uid, name: "UID " + uid });
+  const search = dynamicSearch.trim().toLowerCase();
+  const candidates = [...authors.values()].filter(author => dynamicFilter.uids.includes(author.uid)
+    || !search || author.uid.includes(search) || author.name.toLowerCase().includes(search));
+  return h("Column", { gap: 8, width: "100%" },
+    h("Select", { key: "dynamic-filter-mode", label: "动态用户筛选", value: dynamicFilter.mode,
+      items: [{ label: "全部用户", value: "all" }, { label: "只看选中用户", value: "include" }, { label: "屏蔽选中用户", value: "exclude" }],
+      onChange: mode => saveDynamicFilter({ ...dynamicFilter, mode }) }),
+    note("候选用户来自已加载动态，也可直接添加 UID。筛选按发布者生效。", { wrap: true }),
+    h("SearchField", { key: "dynamic-author-search", value: dynamicSearch, placeholder: "搜索昵称或 UID", width: "100%",
+      onChange: value => { dynamicSearch = String(value); $metrix.invalidate(); } }),
+    h("Row", { gap: 6, width: "100%", alignItems: "center" },
+      h("TextInput", { key: "dynamic-user-add", value: dynamicUIDDraft, placeholder: "添加用户 UID", grow: 1, minWidth: 0,
+        onChange: value => { dynamicUIDDraft = String(value); }, onSubmit: addDynamicUser }),
+      h("Button", { key: "dynamic-user-add-button", text: "添加", onClick: addDynamicUser })),
+    dynamicFilterError ? note(dynamicFilterError, { textColor: "warning", wrap: true }) : null,
+    h("Scroll", { maxHeight: 150, width: "100%" }, h("Column", { gap: 6, width: "100%", paddingRight: 12 },
+      candidates.map(author => h("Checkbox", { key: "dynamic-user-" + author.uid, label: author.name + " · " + author.uid,
+        value: dynamicFilter.uids.includes(author.uid), onChange: selected => selectDynamicUser(author.uid, selected === true) })),
+      !candidates.length ? note("没有匹配用户，可直接添加 UID。", { wrap: true }) : null)),
+    h("Button", { key: "dynamic-filter-clear", text: "清空已选用户", disabled: !dynamicFilter.uids.length,
+      onClick: () => saveDynamicFilter({ ...dynamicFilter, uids: [] }) }));
+}
+function Dynamics() {
+  const selected = new Set(dynamicFilter.uids);
+  const items = (dynamics?.items || []).filter(item => dynamicFilter.mode === "all"
+    || (dynamicFilter.mode === "include" ? selected.has(item.uid) : !selected.has(item.uid)));
+  return h("Column", { gap: 8, width: "100%", minWidth: 0, paddingRight: 16 },
+    h("Row", { width: "100%", alignItems: "center", gap: 6 },
+      text("动态", { fontWeight: 600, grow: 1 }),
+      h("Button", { key: "dynamic-filter-toggle", text: dynamicFilterOpen ? "收起筛选" : "筛选用户",
+        onClick: () => { dynamicFilterOpen = !dynamicFilterOpen; $metrix.invalidate(); } })),
+    note((dynamicFilter.mode === "all" ? "全部用户" : dynamicFilter.mode === "include" ? "只看选中用户" : "屏蔽选中用户")
+      + (dynamicFilter.mode === "all" ? "" : " · " + selected.size + " 位"), { key: "dynamic-filter-summary" }),
+    dynamicFilterOpen ? DynamicFilters() : null,
+    sectionError("dynamic"),
+    dynamics === null ? note(dynamicInflight || loading ? "正在读取动态…" : "动态尚不可用，请刷新。", { wrap: true })
+      : !items.length ? note(dynamicFilter.mode === "include" && !selected.size ? "请选择要查看的用户。"
+        : dynamics.items.length ? "已加载动态中没有匹配内容，可调整筛选或加载更多。" : "暂无可显示的动态。", { key: "dynamic-empty", wrap: true }) : null,
+    items.map(item => h("ButtonBase", { key: "dynamic-item-" + item.id, width: "100%", minWidth: 0, padding: 10, radius: 12,
+      background: "surfaceHover", hover: { background: "surfacePressed" }, focusRing: true, ...pressStyle(),
+      label: item.name + "的动态", onClick: launch("https://t.bilibili.com/" + item.id) },
+      h("Column", { gap: 6, width: "100%", minWidth: 0 },
+        h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "center" },
+          h("Avatar", { name: item.name, ...(item.avatar ? { src: item.avatar } : {}), width: 28, height: 28, radius: 14, shrink: 0 }),
+          h("Column", { gap: 2, grow: 1, minWidth: 0 }, text(item.name, { fontSize: 13, singleLine: true, tooltip: "UID " + item.uid }),
+            note(stamp(item.at), { fontSize: 10, singleLine: true }))),
+        text(item.text, { key: "dynamic-text-" + item.id, fontSize: 12, wrap: true, maxLines: 5, minWidth: 0 }),
+        note("查看原文", { fontSize: 10 })))),
+    dynamics ? note("已加载 " + dynamics.items.length + " 条 · 显示 " + items.length + " 条", { key: "dynamic-count" }) : null,
+    dynamics?.hasMore && dynamics.items.length < 100 ? h("Button", { key: "dynamic-more", text: dynamicInflight ? "正在加载…" : "加载更多",
+      disabled: !!dynamicInflight || loading, onClick: () => refreshDynamics(true) }) : null,
+    dynamics?.items.length >= 100 ? note("已加载 100 条，刷新可查看最新动态。", { wrap: true }) : null);
+}
 function ConversationList() {
   const dense = privateCardSize === "compact";
   let items;
@@ -904,6 +1124,7 @@ function IdentityHeader(now) {
         width: 40, height: 40, radius: 20, fit: "cover", label: account.name + "的头像" })),
     text(account.name, { key: "account-name", fontSize: 16, fontWeight: 500, grow: 1, minWidth: 0,
       singleLine: true, tooltip: account.name, onClick: launch("https://space.bilibili.com/" + account.uid) }),
+    h("MenuButton", { key: "menu-button", label: "菜单", shrink: 0, menu: pageMenu() }),
     RefreshButton(now));
 }
 function RefreshButton(now) {
@@ -914,6 +1135,35 @@ function RefreshButton(now) {
     h("Row", { gap: 6, alignItems: "center" },
       h("Icon", { key: "refresh-icon", svg: REFRESH_ICON, width: 16, height: 16, fontSize: 16,
         rotate: refreshAngle(now), transformOrigin: [0.5, 0.5] }), text("刷新", { fontSize: 13, fontWeight: 500 })));
+}
+function pageMenu() {
+  return [...tabs.map(item => ({ label: item.label, checked: tab === item.id && !menuSettingsOpen,
+    onClick: () => { menuSettingsOpen = false; selectTab(item.id); $metrix.invalidate(); } })),
+    { separator: true }, { label: "菜单管理", onClick: () => { menuSettingsOpen = true; $metrix.invalidate(); } }];
+}
+function MenuSettings() {
+  return h("Scroll", { grow: 1, minHeight: 0, width: "100%" }, h("Column", { gap: 10, width: "100%", paddingRight: 16 },
+    h("Row", { gap: 8, alignItems: "center", width: "100%" }, text("菜单管理", { grow: 1, fontWeight: 600 }),
+      h("Button", { key: "menu-settings-close", text: "完成", onClick: () => { menuSettingsOpen = false; $metrix.invalidate(); } })),
+    h("Row", { gap: 8, alignItems: "center", width: "100%" }, text("显示标签栏", { grow: 1 }),
+      h("Switch", { key: "menu-visible", label: "显示标签栏", value: navigation.visible,
+        onChange: value => saveNavigation({ ...navigation, visible: value === true }) })),
+    note("关闭标签栏后，仍可从顶部菜单切换页面。", { wrap: true }),
+    orderedTabs().map((item, index) => {
+      const inputs = lastEnv.inputs;
+      const available = item.id === "account" ? ["identity", "followers", "level"].some(key => inputs["show_" + key] !== false)
+        : inputs["show_" + item.id] !== false && (item.id !== "messages"
+          || ["message_private", ...NOTIFICATION_FEATURE_KEYS].some(key => inputs["show_" + key] !== false));
+      return h("Column", { key: "menu-row-" + item.id, gap: 4, width: "100%" },
+        h("Row", { gap: 6, alignItems: "center", width: "100%" }, text(item.label, { grow: 1 }),
+          h("Button", { key: "menu-up-" + item.id, text: "上移", label: "上移" + item.label, disabled: index === 0, onClick: () => moveMenu(item.id, -1) }),
+          h("Button", { key: "menu-down-" + item.id, text: "下移", label: "下移" + item.label, disabled: index === TABS.length - 1, onClick: () => moveMenu(item.id, 1) }),
+          h("Switch", { key: "menu-enable-" + item.id, label: "启用" + item.label, disabled: !available,
+            value: available && !navigation.hidden.includes(item.id), onChange: value => saveNavigation({ ...navigation,
+              hidden: value ? navigation.hidden.filter(id => id !== item.id) : [...new Set([...navigation.hidden, item.id])] }) })),
+        !available ? note("请先在看板设置中启用此页内容。", { wrap: true }) : null);
+    }),
+    h("Button", { key: "menu-reset", text: "恢复菜单默认设置", onClick: () => saveNavigation({ order: TABS.map(item => item.id), hidden: [], visible: true }) })));
 }
 function Navigation(width, now) {
   const pill = h("Box", { key: "tab-pill", width: (width - 6) / tabs.length, height: 28,
@@ -935,7 +1185,7 @@ function Pages(now) {
       width: "100%", height: "100%", minHeight: 0, opacity: visuals[i].opacity, blur: visuals[i].blur,
       translate: [visuals[i].x, 0], hidden: i !== active && (!tabMotion || visuals[i].opacity === 0), ignoreInput: i !== active },
       h("Scroll", { key: "scroll-" + item.id, width: "100%", grow: 1, minHeight: 0 },
-        item.id === "account" ? Account(now) : item.id === "videos" ? Videos() : Messages()))));
+        item.id === "account" ? Account(now) : item.id === "videos" ? Videos() : item.id === "dynamic" ? Dynamics() : Messages()))));
 }
 function LoginPanel(width) {
   const busy = login.phase === "generating" || login.phase === "saving";
@@ -970,9 +1220,10 @@ function panel(env) {
   const now = Date.now(), connected = account && login.phase === "idle" && !inputError;
   const width = Math.max(200, Math.min(320, env.viewport?.width || 320)) - 32;
   const compactAccount = tabs.length === 1 && tabs[0].id === "account" && !features.followers;
-  const connectedHeight = compactAccount ? (features.level ? 280 : 208) : 400;
+  const connectedHeight = menuSettingsOpen || tab === "dynamic" ? 440 : compactAccount ? (features.level ? 280 : 208) : 400;
   const contextMenu = [{ label: "重新扫码登录", onClick: () => startLogin() },
-    { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") }];
+    { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") },
+    { label: "菜单管理", onClick: () => { menuSettingsOpen = true; $metrix.invalidate(); } }];
   const identity = account ? `${account.uid}:${account.level}:${account.xp}` : "";
   if (identity !== barIdentity) {
     barIdentity = identity;
@@ -989,9 +1240,10 @@ function panel(env) {
         h("Icon", { svg: MARK, width: 22, height: 22, fontSize: 22, textColor: "accent" })),
       h("Column", { gap: 0, grow: 1, minWidth: 0 },
         text("哔哩哔哩", { fontSize: 16, fontWeight: 500 }), note(account ? "切换账户" : "账户登录"))),
-    connected && tabs.length > 1 ? Navigation(width, now) : null,
+    connected && !menuSettingsOpen && navigation.visible && tabs.length > 1 ? Navigation(width, now) : null,
+    preferenceError ? note(preferenceError, { textColor: "warning", wrap: true }) : null,
     connected ? sectionError("account") : null,
-    connected ? Pages(now) : h("Scroll", { grow: 1, minHeight: 0, width: "100%" },
+    connected ? menuSettingsOpen ? MenuSettings() : Pages(now) : h("Scroll", { grow: 1, minHeight: 0, width: "100%" },
       login.phase !== "idle" || inputError || errors.account ? LoginPanel(width)
         : h("Column", { gap: 12, padding: 12, radius: 12, background: "surfaceHover", width: "100%", alignItems: "center" },
           h("Loading", { size: 24, label: "读取账户" }), note("正在读取账户…"))),
@@ -1000,6 +1252,7 @@ function panel(env) {
     connected ? note("整体每 6 小时" + (privateEnabled() ? " · 私信每 " + PRIVATE_RATES[privateRate].label : ""), { singleLine: true,
       tooltip: ["账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
         features.videos ? "视频 " + stamp(times.videos) : null,
+        features.dynamic ? "动态 " + stamp(times.dynamic) : null,
         privateEnabled() ? "私信 " + stamp(times.private) : null,
         privateEnabled() && privateDisplay === "list" ? "会话 " + stamp(times.conversations) : null,
         notificationsEnabled() ? "通知 " + stamp(times.notifications) : null].filter(Boolean).join(" · ") })
@@ -1016,6 +1269,7 @@ export default {
       error: inputError || Object.values(errors).join("；"),
       menu: [{ label: "刷新", disabled: loading || !!inputError, onClick: () => requestRefresh() },
         { label: "扫码登录", onClick: () => startLogin() },
+        { label: "页面", items: pageMenu() },
         privateEnabled() ? { label: "打开私信", onClick: launch("https://message.bilibili.com/#/whisper") } : null].filter(Boolean) }, panel: panel(env) };
   },
   async event(name, payload) {
@@ -1032,6 +1286,7 @@ export default {
     if (name === "lifecycle" && payload?.type === "stop") {
       generation++;
       refreshController?.abort();
+      cancelDynamicRefresh();
       privateLive = false;
       cancelPrivateRefresh();
       uiLive = false;

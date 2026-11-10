@@ -93,7 +93,7 @@ function worker({ store = new Map(), intercept = () => undefined, secret = "fixt
     },
   });
   runInContext(script.replace("export default", "globalThis.dashboard ="), context);
-  const env = { inputs: { video_count: "3", ...inputs }, reason: "manual" };
+  const env = { inputs: { video_count: "3", show_dynamic: false, ...inputs }, reason: "manual" };
   return {
     store, state, env, clock, requests, openedURLs, storageWrites,
     render: () => context.dashboard.render(env),
@@ -1543,5 +1543,538 @@ describe("optional private conversation cards", () => {
     expect(JSON.stringify(restarted.render())).not.toContain("合成用户");
     const privateRequests = w.requests.filter(({ url }) => url.hostname === "api.vc.bilibili.com");
     expect(privateRequests.every(({ options }) => !options.method || options.method === "GET")).toBe(true);
+  });
+});
+
+const DYNAMIC = "/x/polymer/web-dynamic/v1/feed/all";
+const DYNAMIC_IDS = ["90071992547409931", "90071992547409932", "90071992547409933"];
+const dynamicPayload = (items, offset = "", hasMore = false) => ok({ items, offset, has_more: hasMore });
+function dynamicItem(id = DYNAMIC_IDS[0], uid = "71001", extra = {}) {
+  return { id_str: id, type: "DYNAMIC_TYPE_WORD", visible: true,
+    modules: { module_author: { mid: Number(uid), name: "合成动态作者 " + uid, face: "", pub_ts: 1794222000 },
+      module_dynamic: { desc: { text: "合成动态正文 " + id } } }, ...extra };
+}
+function dynamicFeed(items = [dynamicItem(), dynamicItem(DYNAMIC_IDS[1], "71002")]) {
+  const state = { uid: 12345, items, offset: "", hasMore: false, failure: false, page: null };
+  return { state, intercept(url) {
+    if (url.pathname === NAV) return nav(state.uid);
+    if (url.pathname === FANS) return ok({ mid: state.uid, follower: 1200, following: 88 });
+    if (url.pathname === LIST && state.uid !== 12345) return ok({ arc_audits: [], page: { pn: 1, ps: 30, count: 0 } });
+    if (url.pathname === DYNAMIC) return state.page ? state.page(url)
+      : state.failure ? { code: -352, message: "synthetic-remote-dynamic-secret" }
+      : dynamicPayload(state.items, state.offset, state.hasMore);
+  } };
+}
+const dynamicIDs = w => nodes(w.render()).map(node => node.props?.key || node.key)
+  .filter(key => typeof key === "string" && key.startsWith("dynamic-item-"));
+const dynamicRequests = w => w.requests.filter(({ url }) => url.pathname === DYNAMIC);
+const change = (w, key, next) => find(w.render(), key).props.onChange(next);
+const menuEntries = w => find(w.render(), "menu-button").props.menu;
+const menuPages = w => menuEntries(w).filter(item => ["消息", "视频", "账户", "动态"].includes(item.label)).map(item => item.label);
+const openMenuSettings = w => menuEntries(w).find(item => item.label === "菜单管理").onClick();
+function openDynamicFilter(w) {
+  w.select("dynamic");
+  w.click("dynamic-filter-toggle");
+}
+
+describe("persistent panel menu preferences", () => {
+  test("ordering persists across restart and keeps the active page while moving it", async () => {
+    const feed = dynamicFeed();
+    const store = new Map();
+    const w = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    expect(menuPages(w)).toEqual(["消息", "视频", "账户", "动态"]);
+    w.select("dynamic");
+    openMenuSettings(w);
+    for (let i = 0; i < 3; i++) w.click("menu-up-dynamic");
+    w.click("menu-settings-close");
+    expect(menuPages(w)).toEqual(["动态", "消息", "视频", "账户"]);
+    expect(find(w.render(), "page-dynamic").props.ignoreInput).toBe(false);
+    expect(JSON.parse(store.get("navigation:v1"))).toEqual({ order: ["dynamic", "messages", "videos", "account"], hidden: [], visible: true });
+    const restarted = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await restarted.refresh();
+    expect(menuPages(restarted)).toEqual(["动态", "消息", "视频", "账户"]);
+    expect(find(restarted.render(), "page-dynamic").props.ignoreInput).toBe(false);
+  });
+
+  test("hidden tab strip retains header navigation and resets with page visibility", async () => {
+    const w = worker();
+    await w.refresh();
+    openMenuSettings(w);
+    change(w, "menu-visible", false);
+    await change(w, "menu-enable-videos", false);
+    w.click("menu-settings-close");
+    expect(find(w.render(), "navigation")).toBeUndefined();
+    expect(menuPages(w)).toEqual(["消息", "账户"]);
+    menuEntries(w).find(item => item.label === "账户").onClick();
+    expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
+    expect(JSON.parse(w.store.get("navigation:v1"))).toMatchObject({ hidden: ["videos"], visible: false });
+    openMenuSettings(w);
+    await w.click("menu-reset");
+    w.click("menu-settings-close");
+    expect(find(w.render(), "navigation")).toBeDefined();
+    expect(menuPages(w)).toEqual(["消息", "视频", "账户"]);
+    expect(JSON.parse(w.store.get("navigation:v1"))).toEqual({ order: ["messages", "videos", "account", "dynamic"], hidden: [], visible: true });
+  });
+
+  test("hiding the active page falls back and suppresses optional requests without mutating native inputs", async () => {
+    const w = worker({ inputs: { show_videos: true, show_video_likes: false } });
+    await w.refresh();
+    w.select("videos");
+    openMenuSettings(w);
+    await change(w, "menu-enable-videos", false);
+    await change(w, "menu-enable-messages", false);
+    w.click("menu-settings-close");
+    expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
+    const before = w.requests.length;
+    await w.refresh();
+    expect(w.requests.slice(before).map(({ url }) => url.pathname).sort()).toEqual([NAV, FANS].sort());
+    expect(w.env.inputs.show_videos).toBe(true);
+    expect(w.env.inputs.show_video_likes).toBe(false);
+    openMenuSettings(w);
+    await change(w, "menu-enable-account", false);
+    w.click("menu-settings-close");
+    for (const key of ["uid", "coins", "followers", "level", "navigation"]) expect(find(w.render(), key)).toBeUndefined();
+    expect(find(w.render(), "menu-button")).toBeDefined();
+    const allOff = w.requests.length;
+    await w.refresh();
+    expect(w.requests.slice(allOff).map(({ url }) => url.pathname)).toEqual([NAV]);
+    openMenuSettings(w);
+    await change(w, "menu-enable-videos", true);
+    w.click("menu-settings-close");
+    await w.refresh();
+    expect(find(w.render(), "page-videos")).toBeDefined();
+    expect(find(w.render(), "BV1FixtureNew-点赞")).toBeUndefined();
+  });
+
+  test("native switches remain the upper gate after restoring local menu settings", async () => {
+    const w = worker({ inputs: { show_videos: false, show_messages: false } });
+    await w.refresh();
+    openMenuSettings(w);
+    for (const id of ["videos", "messages", "dynamic"]) expect(find(w.render(), "menu-enable-" + id).props.disabled).toBe(true);
+    w.click("menu-reset");
+    w.click("menu-settings-close");
+    expect(menuPages(w)).toEqual(["账户"]);
+    expect(w.requests.some(({ url }) => [LIST, VIEW, DYNAMIC, PRIVATE].includes(url.pathname))).toBe(false);
+  });
+
+  test("malformed stored navigation is normalized to one copy of every supported page", async () => {
+    const store = new Map([["navigation:v1", JSON.stringify({ order: ["dynamic", "dynamic", "unknown", "account"], hidden: ["unknown"], visible: true })]]);
+    const feed = dynamicFeed();
+    const w = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    expect(menuPages(w)).toEqual(["动态", "账户", "消息", "视频"]);
+    expect(find(w.render(), "page-dynamic").props.ignoreInput).toBe(false);
+  });
+
+  test("menu persistence failures surface a safe error and retain saved choices", async () => {
+    const store = new Map();
+    store.set = () => { throw new Error("synthetic-storage-secret"); };
+    const w = worker({ store, inputs: { show_followers: false, show_videos: false } });
+    await w.refresh();
+    openMenuSettings(w);
+    const before = JSON.stringify(w.render());
+    change(w, "menu-visible", false);
+    expect(find(w.render(), "menu-visible").props.value).toBe(true);
+    expect(JSON.stringify(w.render())).not.toBe(before);
+    expect(JSON.stringify(w.render())).not.toContain("synthetic-storage-secret");
+    expect(store.has("navigation:v1")).toBe(false);
+  });
+});
+
+describe("dynamic feed and author preferences", () => {
+  test("dynamics wait for verified identity and are never requested when native-disabled", async () => {
+    for (const response of [{ code: -101 }, ok({ isLogin: false }), ok({ isLogin: true, mid: null })]) {
+      const w = worker({ inputs: { show_dynamic: true }, intercept: url => url.pathname === NAV ? response : undefined });
+      await w.refresh();
+      expect(dynamicRequests(w)).toEqual([]);
+    }
+    const disabled = worker();
+    await disabled.refresh();
+    expect(dynamicRequests(disabled)).toEqual([]);
+    const feed = dynamicFeed();
+    let verified = false;
+    const w = worker({ inputs: { show_dynamic: true }, intercept: url => {
+      if (url.pathname === NAV) verified = true;
+      if (url.pathname === DYNAMIC) expect(verified).toBe(true);
+      return feed.intercept(url);
+    } });
+    await w.refresh();
+    expect(dynamicRequests(w)).toHaveLength(1);
+    expect(dynamicRequests(w)[0].url.searchParams.get("type")).toBe("all");
+    expect(dynamicRequests(w)[0].options.headers.Cookie).toBe("SESSDATA=fixture-session");
+  });
+
+  test("decimal IDs stay distinct, invisible entries disappear, and links use the original dynamic ID", async () => {
+    const feed = dynamicFeed([dynamicItem(), dynamicItem(DYNAMIC_IDS[1]),
+      dynamicItem(DYNAMIC_IDS[2], "71002", { visible: false }),
+      dynamicItem("90071992547409934", "71003", { type: "DYNAMIC_TYPE_FUTURE", basic: { jump_url: "https://attacker.invalid/" } })]);
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0], "dynamic-item-" + DYNAMIC_IDS[1], "dynamic-item-" + "90071992547409934"]);
+    w.click("dynamic-item-" + DYNAMIC_IDS[1]);
+    w.click("dynamic-item-" + "90071992547409934");
+    expect(w.openedURLs).toEqual(["https://t.bilibili.com/" + DYNAMIC_IDS[1], "https://t.bilibili.com/90071992547409934"]);
+    expect(JSON.stringify(w.render())).not.toContain("attacker.invalid");
+  });
+
+  test("archive, opus, article, draw and forwards retain readable synthetic summaries", async () => {
+    const definitions = [
+      ["ARCHIVE", { archive: { title: "合成视频标题", desc: "合成视频说明", jump_url: "https://attacker.invalid/video" } }, "合成视频标题"],
+      ["OPUS", { opus: { title: "合成图文标题", summary: { text: "合成图文摘要" } } }, "合成图文摘要"],
+      ["ARTICLE", { article: { title: "合成专栏标题", desc: "合成专栏摘要" } }, "合成专栏标题"],
+      ["DRAW", { draw: { items: [{ src: "https://attacker.invalid/image" }] } }, "合成配图描述"],
+    ];
+    const items = definitions.map(([type, major], index) => dynamicItem(String(81000 + index), "71001", {
+      type: "DYNAMIC_TYPE_" + type,
+      modules: { module_author: { mid: 71001, name: "合成发布者", pub_ts: 1794222000 },
+        module_dynamic: { desc: { text: "合成配图描述" }, major: { type: "MAJOR_TYPE_" + type, ...major } } },
+    }));
+    items.push(dynamicItem("81004", "71002", { type: "DYNAMIC_TYPE_FORWARD", orig: dynamicItem("81005", "71003") }));
+    const feed = dynamicFeed(items);
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    for (let i = 0; i < definitions.length; i++) expect(value(w, "dynamic-text-" + (81000 + i))).toContain(definitions[i][2]);
+    expect(value(w, "dynamic-text-81004")).toContain("合成动态正文 81005");
+    expect(JSON.stringify(w.render())).not.toContain("attacker.invalid");
+  });
+
+  test("include and exclude apply immediately to publishing authors with explicit empty-set behavior", async () => {
+    const feed = dynamicFeed([dynamicItem(), dynamicItem(DYNAMIC_IDS[1], "71002", { type: "DYNAMIC_TYPE_FORWARD", orig: dynamicItem("81005", "71001") })]);
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    openDynamicFilter(w);
+    const before = w.requests.length;
+    change(w, "dynamic-filter-mode", "include");
+    expect(dynamicIDs(w)).toEqual([]);
+    change(w, "dynamic-user-" + "71001", true);
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0]]);
+    change(w, "dynamic-filter-mode", "exclude");
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[1]]);
+    w.click("dynamic-filter-clear");
+    expect(dynamicIDs(w)).toHaveLength(2);
+    change(w, "dynamic-filter-mode", "include");
+    expect(dynamicIDs(w)).toEqual([]);
+    change(w, "dynamic-filter-mode", "all");
+    expect(dynamicIDs(w)).toHaveLength(2);
+    expect(w.requests).toHaveLength(before);
+    expect(JSON.parse(w.store.get("dynamic-filter:v1:12345"))).toEqual({ mode: "all", uids: [] });
+  });
+
+  test("search matches author name or UID and selected absent authors remain manageable", async () => {
+    const feed = dynamicFeed();
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    openDynamicFilter(w);
+    change(w, "dynamic-user-" + "71001", true);
+    change(w, "dynamic-author-search", "71002");
+    expect(find(w.render(), "dynamic-user-" + "71002")).toBeDefined();
+    expect(find(w.render(), "dynamic-user-" + "71001")).toBeDefined();
+    change(w, "dynamic-author-search", "合成动态作者 71002");
+    expect(find(w.render(), "dynamic-user-" + "71002")).toBeDefined();
+    change(w, "dynamic-author-search", "不存在的合成作者");
+    expect(find(w.render(), "dynamic-user-" + "71002")).toBeUndefined();
+    expect(find(w.render(), "dynamic-user-" + "71001")).toBeDefined();
+    change(w, "dynamic-user-add", "71999");
+    w.click("dynamic-user-add-button");
+    expect(find(w.render(), "dynamic-user-71999")).toBeDefined();
+    expect(find(w.render(), "dynamic-user-" + "71999").props.label).toContain("71999");
+    const saved = w.store.get("dynamic-filter:v1:12345");
+    for (const invalid of ["", "0", "-1", "1e5", "12.5", "abc", "https://space.bilibili.com/71001"]) {
+      change(w, "dynamic-user-add", invalid);
+      w.click("dynamic-user-add-button");
+      expect(w.store.get("dynamic-filter:v1:12345")).toBe(saved);
+    }
+    feed.state.items = [dynamicItem(DYNAMIC_IDS[1], "71002")];
+    await w.refresh();
+    expect(find(w.render(), "dynamic-user-" + "71001")).toBeDefined();
+    expect(find(w.render(), "dynamic-user-71999")).toBeDefined();
+    expect(find(w.render(), "dynamic-user-" + "71001").props.label).toContain("UID 71001");
+  });
+
+  test("filters restore only after verified UID and stay isolated while account changes clear feed and drafts", async () => {
+    const feed = dynamicFeed();
+    const store = new Map();
+    const w = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    openDynamicFilter(w);
+    change(w, "dynamic-filter-mode", "include");
+    change(w, "dynamic-user-" + "71001", true);
+    change(w, "dynamic-author-search", "private-search-draft");
+    change(w, "dynamic-user-add", "71999");
+    const original = store.get("dynamic-filter:v1:12345");
+    feed.state.uid = 67890;
+    w.state.secret = "second-synthetic-session";
+    expect(dynamicIDs(w)).toEqual([]);
+    expect(JSON.stringify(w.render())).not.toContain("private-search-draft");
+    await w.refresh();
+    openDynamicFilter(w);
+    expect(find(w.render(), "dynamic-filter-mode").props.value).toBe("all");
+    expect(find(w.render(), "dynamic-author-search").props.value).toBe("");
+    expect(find(w.render(), "dynamic-user-add").props.value).toBe("");
+    expect(dynamicIDs(w)).toHaveLength(2);
+    change(w, "dynamic-filter-mode", "exclude");
+    change(w, "dynamic-user-" + "71002", true);
+    expect(store.get("dynamic-filter:v1:12345")).toBe(original);
+    expect(JSON.parse(store.get("dynamic-filter:v1:67890"))).toEqual({ mode: "exclude", uids: ["71002"] });
+    feed.state.uid = 12345;
+    const restarted = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
+    expect(dynamicIDs(restarted)).toEqual([]);
+    await restarted.refresh();
+    openDynamicFilter(restarted);
+    expect(find(restarted.render(), "dynamic-filter-mode").props.value).toBe("include");
+    expect(dynamicIDs(restarted)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0]]);
+  });
+
+  test("dynamic content, author names, images and drafts never enter persistent storage", async () => {
+    const feed = dynamicFeed();
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    openDynamicFilter(w);
+    change(w, "dynamic-user-" + "71001", true);
+    change(w, "dynamic-author-search", "synthetic-unsaved-search");
+    change(w, "dynamic-user-add", "synthetic-unsaved-draft");
+    const saved = JSON.stringify({ entries: [...w.store], writes: w.storageWrites });
+    for (const marker of ["合成动态正文", "合成动态作者", DYNAMIC_IDS[0], "synthetic-unsaved", "fixture-session"]) expect(saved).not.toContain(marker);
+    expect(w.state.saved).toEqual([]);
+    const restarted = worker({ store: w.store, inputs: { show_dynamic: true }, intercept: feed.intercept });
+    expect(dynamicIDs(restarted)).toEqual([]);
+    expect(JSON.stringify(restarted.render())).not.toContain("合成动态");
+  });
+
+  test("filter storage failures leave the displayed filter unchanged and hide exception details", async () => {
+    const feed = dynamicFeed();
+    const store = new Map();
+    const w = worker({ store, inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    openDynamicFilter(w);
+    const before = JSON.stringify(w.render());
+    store.set = () => { throw new Error("synthetic-storage-secret"); };
+    change(w, "dynamic-filter-mode", "include");
+    expect(find(w.render(), "dynamic-filter-mode").props.value).toBe("all");
+    expect(dynamicIDs(w)).toHaveLength(2);
+    expect(JSON.stringify(w.render())).not.toBe(before);
+    expect(JSON.stringify(w.render())).not.toContain("synthetic-storage-secret");
+    expect(store.has("dynamic-filter:v1:12345")).toBe(false);
+  });
+
+  test("manual pagination encodes cursors and rejects repeated cursors without replacing cards", async () => {
+    const feed = dynamicFeed([dynamicItem()]);
+    const cursor = "synthetic cursor/+?=";
+    feed.state.offset = cursor;
+    feed.state.hasMore = true;
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    expect(dynamicRequests(w)).toHaveLength(1);
+    feed.state.page = url => {
+      expect(url.searchParams.get("offset")).toBe(cursor);
+      return dynamicPayload([dynamicItem(), dynamicItem(DYNAMIC_IDS[1], "71002")], cursor, true);
+    };
+    await w.click("dynamic-more");
+    await w.flush();
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0]]);
+    expect(dynamicRequests(w)).toHaveLength(2);
+    expect(find(w.render(), "error-dynamic")).toBeDefined();
+  });
+
+  test("duplicate-only pages advance distinct cursors while loaded feed stays bounded to 100 items", async () => {
+    for (const duplicateOnly of [true, false]) {
+      const feed = dynamicFeed([dynamicItem()]);
+      feed.state.offset = "page-2";
+      feed.state.hasMore = true;
+      const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+      await w.refresh();
+      feed.state.page = () => dynamicPayload(duplicateOnly ? [dynamicItem()]
+        : Array.from({ length: 120 }, (_, i) => dynamicItem(String(82000 + i))), "page-3", true);
+      await w.click("dynamic-more");
+      await w.flush();
+      expect(dynamicIDs(w)).toHaveLength(duplicateOnly ? 1 : 100);
+      expect(new Set(dynamicIDs(w)).size).toBe(dynamicIDs(w).length);
+      const more = find(w.render(), "dynamic-more");
+      if (duplicateOnly) {
+        expect(more.props.disabled).toBe(false);
+        feed.state.page = url => {
+          expect(url.searchParams.get("offset")).toBe("page-3");
+          return dynamicPayload([dynamicItem(), dynamicItem(DYNAMIC_IDS[1])]);
+        };
+        await w.click("dynamic-more");
+        await w.flush();
+        expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0], "dynamic-item-" + DYNAMIC_IDS[1]]);
+      } else expect(!more || more.props.disabled).toBe(true);
+    }
+  });
+
+  test("concurrent load-more clicks share one request and filters apply to newly appended authors", async () => {
+    const feed = dynamicFeed([dynamicItem()]);
+    feed.state.offset = "page-2";
+    feed.state.hasMore = true;
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    openDynamicFilter(w);
+    change(w, "dynamic-filter-mode", "include");
+    change(w, "dynamic-user-add", "71002");
+    w.click("dynamic-user-add-button");
+    expect(dynamicIDs(w)).toEqual([]);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    feed.state.page = () => pending;
+    const onClick = find(w.render(), "dynamic-more").props.onClick;
+    const first = onClick();
+    const second = onClick();
+    await w.flush();
+    expect(dynamicRequests(w)).toHaveLength(2);
+    release(dynamicPayload([dynamicItem(DYNAMIC_IDS[1], "71002")]));
+    await Promise.all([first, second]);
+    await w.flush();
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[1]]);
+    expect(find(w.render(), "dynamic-user-" + "71002")).toBeDefined();
+  });
+
+  test("failed refresh and malformed pages preserve loaded cards until a successful replacement", async () => {
+    const feed = dynamicFeed();
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    const initial = dynamicIDs(w);
+    for (const response of [{ code: -352, message: "synthetic-remote-dynamic-secret" }, ok({ items: null }), ok({})]) {
+      feed.state.page = () => response;
+      await w.refresh();
+      expect(dynamicIDs(w)).toEqual(initial);
+      expect(find(w.render(), "error-dynamic")).toBeDefined();
+      expect(JSON.stringify(w.render())).not.toContain("synthetic-remote-dynamic-secret");
+    }
+    feed.state.page = null;
+    feed.state.items = [dynamicItem(DYNAMIC_IDS[2])];
+    await w.refresh();
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[2]]);
+    expect(find(w.render(), "error-dynamic")).toBeUndefined();
+  });
+
+  test("failed load-more retains the cursor and cards for an explicit retry", async () => {
+    const feed = dynamicFeed([dynamicItem()]);
+    feed.state.offset = "retry-cursor";
+    feed.state.hasMore = true;
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    feed.state.failure = true;
+    await w.click("dynamic-more");
+    await w.flush();
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[0]]);
+    expect(find(w.render(), "error-dynamic")).toBeDefined();
+    feed.state.failure = false;
+    feed.state.items = [dynamicItem(DYNAMIC_IDS[1])];
+    feed.state.hasMore = false;
+    await w.click("dynamic-more");
+    await w.flush();
+    expect(dynamicRequests(w).slice(1).map(({ url }) => url.searchParams.get("offset"))).toEqual(["retry-cursor", "retry-cursor"]);
+    expect(dynamicIDs(w)).toHaveLength(2);
+    expect(find(w.render(), "error-dynamic")).toBeUndefined();
+  });
+
+  test("native disable, local hide and stop abort pending pages and reject late success or failure", async () => {
+    for (const action of ["native-disable", "local-hide", "stop"]) {
+      for (const failure of [false, true]) {
+        const feed = dynamicFeed([dynamicItem()]);
+        feed.state.offset = "page-2";
+        feed.state.hasMore = true;
+        let release, signal, hold = false;
+        const pending = new Promise(resolve => { release = resolve; });
+        const w = worker({ inputs: { show_dynamic: true }, intercept: (url, options) => {
+          if (hold && url.pathname === DYNAMIC) { signal = options.signal; return pending; }
+          return feed.intercept(url);
+        } });
+        await w.refresh();
+        await w.event("lifecycle", { type: "start" });
+        hold = true;
+        const more = w.click("dynamic-more");
+        await w.flush();
+        expect(signal).toBeDefined();
+        if (action === "stop") await w.event("lifecycle", { type: "stop" });
+        else if (action === "native-disable") { w.env.inputs.show_dynamic = false; w.render(); }
+        else { openMenuSettings(w); change(w, "menu-enable-dynamic", false); w.click("menu-settings-close"); }
+        expect(signal.aborted).toBe(true);
+        const before = dynamicRequests(w).length;
+        release(failure ? { code: -352 } : dynamicPayload([dynamicItem(DYNAMIC_IDS[2])]));
+        await more;
+        await w.flush();
+        expect(find(w.render(), "dynamic-item-" + DYNAMIC_IDS[2])).toBeUndefined();
+        expect(find(w.render(), "error-dynamic")).toBeUndefined();
+        if (action !== "stop") {
+          expect(dynamicIDs(w)).toEqual([]);
+          await w.refresh();
+          expect(dynamicRequests(w)).toHaveLength(before);
+        }
+      }
+    }
+  });
+
+  test("account changes cancel old pages and cannot restore old feed or error state", async () => {
+    for (const failure of [false, true]) {
+      const feed = dynamicFeed([dynamicItem()]);
+      feed.state.offset = "old-page";
+      feed.state.hasMore = true;
+      let release, signal, hold = false;
+      const pending = new Promise(resolve => { release = resolve; });
+      const w = worker({ inputs: { show_dynamic: true }, intercept: (url, options) => {
+        if (hold && feed.state.uid === 12345 && url.pathname === DYNAMIC) { signal = options.signal; return pending; }
+        return feed.intercept(url);
+      } });
+      await w.refresh();
+      hold = true;
+      const more = w.click("dynamic-more");
+      await w.flush();
+      feed.state.uid = 67890;
+      feed.state.items = [dynamicItem(DYNAMIC_IDS[1], "71002")];
+      feed.state.hasMore = false;
+      w.state.secret = "second-synthetic-session";
+      expect(dynamicIDs(w)).toEqual([]);
+      expect(signal.aborted).toBe(true);
+      await w.refresh();
+      release(failure ? { code: -352 } : dynamicPayload([dynamicItem(DYNAMIC_IDS[2])]));
+      await more;
+      await w.flush();
+      expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[1]]);
+      expect(find(w.render(), "error-dynamic")).toBeUndefined();
+    }
+  });
+
+  test("a due private timer shares an ongoing full refresh while dynamics are pending", async () => {
+    const feed = dynamicFeed();
+    let hold = false, entered, release;
+    const started = new Promise(resolve => { entered = resolve; });
+    const pending = new Promise(resolve => { release = resolve; });
+    const w = worker({ inputs: { show_dynamic: true, private_display: "summary" }, intercept: url => {
+      if (hold && url.pathname === DYNAMIC) { entered(); return pending; }
+      return feed.intercept(url);
+    } });
+    await w.refresh();
+    await w.event("lifecycle", { type: "start" });
+    w.clock.now += 599900;
+    const before = w.requests.length;
+    hold = true;
+    const refresh = w.refresh();
+    await started;
+    await w.tick(100);
+    expect(w.requests.slice(before).filter(({ url }) => url.pathname === PRIVATE)).toHaveLength(1);
+    release(dynamicPayload([dynamicItem(DYNAMIC_IDS[2])]));
+    await refresh;
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + DYNAMIC_IDS[2]]);
+  });
+
+  test("the private timer never refreshes dynamics and disabling dynamics clears its old error", async () => {
+    const feed = dynamicFeed();
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    await w.event("lifecycle", { type: "start" });
+    const before = w.requests.length;
+    await w.tick(600000);
+    expect(w.requests.slice(before).map(({ url }) => url.pathname)).toEqual([PRIVATE]);
+    feed.state.failure = true;
+    await w.refresh();
+    expect(find(w.render(), "error-dynamic")).toBeDefined();
+    w.env.inputs.show_dynamic = false;
+    expect(find(w.render(), "error-dynamic")).toBeUndefined();
+    expect(dynamicIDs(w)).toEqual([]);
+    w.env.inputs.show_dynamic = true;
+    expect(dynamicIDs(w)).toEqual([]);
   });
 });
