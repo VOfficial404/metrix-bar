@@ -1570,11 +1570,63 @@ const dynamicIDs = w => nodes(w.render()).map(node => node.props?.key || node.ke
 const dynamicRequests = w => w.requests.filter(({ url }) => url.pathname === DYNAMIC);
 const change = (w, key, next) => find(w.render(), key).props.onChange(next);
 const menuPages = w => nodes(w.render()).filter(node => node.type === "Part" && node.props?.name === "tab")
-  .map(node => node.children[0].props.text);
+  .map(node => node.children[0].children[0].props.text);
 function openDynamicFilter(w) {
   w.select("dynamic");
   w.click("dynamic-filter-toggle");
 }
+describe("message unread indicators", () => {
+  test("unread dots survive navigation and clear after the next successful zero response", async () => {
+    let unread = 2, fail = false;
+    const w = worker({ intercept: url => {
+      if (url.pathname === PRIVATE) return fail ? { code: -352 } : privatePayload(unread);
+      if (url.pathname === "/x/im/web/msgfeed/unread") return ok({ reply: 0, at: 0, recv_reply: 0, recv_like: 0, sys_msg: 0, up: 0 });
+    } });
+    expect(find(w.render(), "message-tab-unread")).toBeUndefined();
+    await w.refresh();
+    expect(find(w.render(), "message-tab-unread")).toBeDefined();
+    w.select("videos");
+    w.select("messages");
+    expect(find(w.render(), "message-tab-unread")).toBeDefined();
+    fail = true;
+    await w.refresh();
+    expect(find(w.render(), "message-tab-unread")).toBeDefined();
+    fail = false;
+    unread = 0;
+    await w.refresh();
+    expect(find(w.render(), "message-tab-unread")).toBeUndefined();
+    expect(find(w.render(), "message-page-unread")).toBeUndefined();
+    expect(w.requests.every(({ options }) => !options.method || options.method === "GET")).toBe(true);
+  });
+
+  test("only enabled notification categories contribute and intercepted private messages do not", async () => {
+    const w = worker({ inputs: { show_message_likes: false }, intercept: url => {
+      if (url.pathname === PRIVATE) return ok({ follow_unread: 0, unfollow_unread: 0, dustbin_unread: 10 });
+      if (url.pathname === "/x/im/web/msgfeed/unread") return ok({ reply: 0, at: 0, recv_reply: 9, recv_like: 4, sys_msg: 0, up: 0 });
+    } });
+    await w.refresh();
+    expect(find(w.render(), "message-tab-unread")).toBeUndefined();
+    w.env.inputs.show_message_likes = true;
+    expect(find(w.render(), "message-tab-unread")).toBeDefined();
+    w.env.inputs.show_messages = false;
+    expect(find(w.render(), "message-tab-unread")).toBeUndefined();
+    expect(find(w.render(), "message-page-unread")).toBeUndefined();
+  });
+
+  test("combined reply counts require both categories and single-page mode retains the page indicator", async () => {
+    const w = worker({ inputs: { show_videos: false, show_account: false, show_message_private: false,
+      show_message_likes: false, show_message_system: false, show_message_assistant: false },
+      intercept: url => url.pathname === "/x/im/web/msgfeed/unread" ? ok({ recv_reply: 3 }) : undefined });
+    await w.refresh();
+    expect(find(w.render(), "navigation")).toBeUndefined();
+    expect(find(w.render(), "message-page-unread")).toBeDefined();
+    w.env.inputs.show_message_mentions = false;
+    expect(find(w.render(), "message-page-unread")).toBeUndefined();
+    w.env.inputs.show_message_mentions = true;
+    expect(find(w.render(), "message-page-unread")).toBeDefined();
+  });
+});
+
 function filteredDynamicIDs(w) {
   w.click("dynamic-filter-toggle");
   const ids = dynamicIDs(w);

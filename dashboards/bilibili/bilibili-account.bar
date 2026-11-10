@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.11.0" category="social" icon="tv"
+     version="1.12.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -188,6 +188,21 @@ function addDynamicUser() {
 const privateEnabled = () => features.messages && features.message_private;
 const notificationsEnabled = () => features.messages && NOTIFICATION_FEATURE_KEYS.some(key => features[key]);
 const messagesEnabled = () => privateEnabled() || notificationsEnabled();
+function hasUnreadMessages() {
+  if (!features.messages) return false;
+  const n = notifications;
+  return (privateEnabled() && privateMessages?.total > 0)
+    || (features.message_likes && n?.likes > 0)
+    || (features.message_replies && n?.reply > 0)
+    || (features.message_mentions && n?.at > 0)
+    || (features.message_system && n?.system > 0)
+    || (features.message_assistant && n?.assistant > 0)
+    || (features.message_replies && features.message_mentions && n?.reply === null && n?.at === null && n?.combined > 0);
+}
+function UnreadDot(key) {
+  return h("Box", { key, width: 6, height: 6, radius: 3, background: "#E5484D", shrink: 0,
+    label: "有未读消息", tooltip: "有未读消息" });
+}
 const PRIVATE_RATES = {
   "5m": { ms: 300000, label: "5 分钟" }, "10m": { ms: 600000, label: "10 分钟" },
   "30m": { ms: 1800000, label: "30 分钟" }, "1h": { ms: 3600000, label: "1 小时" },
@@ -1069,21 +1084,23 @@ function ConversationList() {
   else items = conversations.map(row => {
     const preview = text(row.preview, { key: "conversation-preview-" + row.uid, fontSize: 12, textColor: "textMuted",
       maxLines: dense ? 1 : 2, wrap: !dense, singleLine: dense, minWidth: 0, tooltip: row.preview, ...(dense ? { grow: 1 } : {}) });
-    const time = note(stamp(row.at), { key: "conversation-time-" + row.uid, fontSize: dense ? 9 : 10, singleLine: true, shrink: 0 });
+    const time = note(stamp(row.at), { key: "conversation-time-" + row.uid, fontSize: 10, singleLine: true, shrink: 0 });
     return h("ButtonBase", { key: "private-session-" + row.uid, width: "100%", minWidth: 0,
-      padding: dense ? 8 : 12, radius: 12, background: "surfaceHover", ...pressStyle(), hover: { background: "surfacePressed" }, focusRing: true,
+      paddingX: 8, paddingY: dense ? 8 : 10, radius: 8, ...pressStyle(), hover: { background: "surfaceHover" }, focusRing: true,
       label: row.name + "的私信会话", onClick: launch("https://message.bilibili.com/#/whisper/mid" + row.uid) },
-      h("Column", { width: "100%", minWidth: 0, gap: dense ? 4 : 8 },
-        h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "center" },
-          h("Avatar", { name: row.name, ...(row.avatar ? { src: row.avatar } : {}), width: dense ? 28 : 36, height: dense ? 28 : 36,
-            radius: dense ? 14 : 18, fit: "cover", shrink: 0, label: row.name + "的头像" }),
-          h("Column", { grow: 1, minWidth: 0, gap: dense ? 1 : 2 },
-            text(row.name, { key: "conversation-name-" + row.uid, fontSize: dense ? 12 : 13, fontWeight: 500, singleLine: true, tooltip: row.name }),
-            note("UID " + row.uid, { key: "conversation-uid-" + row.uid, fontSize: dense ? 9 : 10, singleLine: true })),
-          row.unread ? text(comma(row.unread), { key: "conversation-unread-" + row.uid, fontSize: 11, fontWeight: 600,
-            paddingX: 6, height: 20, radius: 10, background: "accentSubtle", textColor: "accent", shrink: 0,
-            label: comma(row.unread) + "条未读私信" }) : null),
-        dense ? h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "center" }, preview, time) : [preview, time]));
+      h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "start" },
+        h("Avatar", { name: row.name, ...(row.avatar ? { src: row.avatar } : {}), width: dense ? 28 : 36, height: dense ? 28 : 36,
+          radius: dense ? 14 : 18, fit: "cover", shrink: 0, label: row.name + "的头像" }),
+        h("Column", { grow: 1, minWidth: 0, gap: dense ? 3 : 5 },
+          h("Row", { width: "100%", minWidth: 0, gap: 6, alignItems: "center" },
+            text(row.name, { key: "conversation-name-" + row.uid, fontSize: 13, fontWeight: 500,
+              grow: 1, minWidth: 0, singleLine: true, tooltip: row.name }), time),
+          h("Row", { width: "100%", minWidth: 0, gap: 6, alignItems: "center" },
+            h("Column", { grow: 1, minWidth: 0 }, preview),
+            row.unread ? text(comma(row.unread), { key: "conversation-unread-" + row.uid, fontSize: 10, fontWeight: 600,
+              paddingX: 5, height: 18, radius: 9, background: "#E5484D", textColor: "#FFFFFF", shrink: 0,
+              label: comma(row.unread) + "条未读私信" }) : null),
+          note("UID " + row.uid, { key: "conversation-uid-" + row.uid, fontSize: 9, singleLine: true }))));
   });
   return h("Column", { key: "private-conversations", width: "100%", minWidth: 0, gap: dense ? 4 : 8 },
     h("Row", { width: "100%", gap: 8, alignItems: "center", tooltip: "会话更新：" + stamp(times.conversations) },
@@ -1094,7 +1111,14 @@ function ConversationList() {
 function Messages() {
   const n = notifications, root = "https://message.bilibili.com/#/";
   const list = privateEnabled() && privateDisplay === "list";
-  const message = (label, value, key, path, tooltip) => tile(label, comma(value), key, { onClick: launch(root + path), tooltip });
+  const message = (label, value, key, path, tooltip) => h("ButtonBase", { key: "tile-" + key,
+    width: "100%", minWidth: 0, padding: 10, radius: 8, background: "surfaceHover",
+    hover: { background: "surfacePressed" }, focusRing: true, ...pressStyle(),
+    label: label + " " + comma(value), onClick: launch(root + path), ...(tooltip ? { tooltip } : {}) },
+    h("Row", { width: "100%", minWidth: 0, gap: 6, alignItems: "center" },
+      text(label, { fontSize: 12, grow: 1, minWidth: 0, singleLine: true }),
+      text(comma(value), { key, fontSize: 13, fontWeight: 600, fontFeatures: "tnum", shrink: 0,
+        textColor: value > 0 ? "#E5484D" : "textMuted" })));
   const cards = [
     privateEnabled() && !list ? message("未读私信", privateMessages?.total, "private-total", "whisper",
       "已关注 " + comma(privateMessages?.followed) + " · 未关注 " + comma(privateMessages?.unfollowed) + " · 拦截 " + comma(privateMessages?.intercepted)
@@ -1106,11 +1130,13 @@ function Messages() {
     features.message_assistant ? message("UP 主助手", n?.assistant, "notice-assistant", "up") : null,
   ].filter(Boolean);
   // Native scrollbars overlay the viewport; keep message content clear of the trailing rail.
-  return h("Column", { gap: 8, width: "100%", minWidth: 0, paddingRight: 16 }, privateEnabled() ? sectionError("private") : null,
+  return h("Column", { gap: 10, width: "100%", minWidth: 0, paddingRight: 16 },
+    tabs.length === 1 ? h("Row", { gap: 6, alignItems: "center", width: "100%" },
+      text("消息", { fontSize: 13, fontWeight: 500 }), hasUnreadMessages() ? UnreadDot("message-page-unread") : null) : null,
+    privateEnabled() ? sectionError("private") : null,
     notificationsEnabled() ? sectionError("notifications") : null,
     list ? ConversationList() : null,
-    list && cards.length ? note("其他通知", { fontWeight: 500 }) : null,
-    cards.length ? h("Grid", { key: "message-cards", columns: Math.min(2, cards.length), gap: 8, width: "100%" }, cards) : null,
+    cards.length ? h("Grid", { key: "message-cards", columns: Math.min(2, cards.length), gap: 6, width: "100%" }, cards) : null,
     features.message_replies && features.message_mentions && n && n.reply === null && n.at === null && n.combined !== null
       ? note("回复及 @ 合并计数：" + comma(n.combined), { key: "notice-combined" }) : null);
 }
@@ -1144,7 +1170,9 @@ function Navigation(width, now) {
     shadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#0000000a" }, ignoreInput: true });
   const buttons = tabs.map((item, i) => h("Part", { key: "tab-" + item.id, name: "tab", index: i,
     grow: 1, basis: 0, height: 28, padding: 0, radius: 14, alignItems: "center", justify: "center", textColor: tab === item.id ? "text" : "textMuted",
-    focusRing: true, ...pressStyle() }, text(item.label, { fontSize: 13, fontWeight: 500 })));
+    focusRing: true, ...pressStyle() }, h("Row", { gap: 4, alignItems: "center", justify: "center" },
+      text(item.label, { fontSize: 13, fontWeight: 500 }),
+      item.id === "messages" && hasUnreadMessages() ? UnreadDot("message-tab-unread") : null)));
   const controls = h("TabsBase", { key: "navigation", value: tabIndex(), onChange: selectTab,
     rowStart: 1, columnStart: 1, width: "100%" },
     h("Part", { name: "list", padding: 3, height: 34, width: "100%" }, buttons));
