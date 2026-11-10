@@ -164,7 +164,7 @@ function errorSectionText(w, key) {
   return section?.children.map(child => child?.props?.text || "").join("\n");
 }
 function privateSample(w) {
-  return nodes(w.render()).flatMap(node => typeof node.props?.tooltip === "string" ? node.props.tooltip.split(" · ") : [])
+  return nodes(w.render()).flatMap(node => typeof node.props?.tooltip === "string" ? node.props.tooltip.split(/\n| · /) : [])
     .find(part => part.startsWith("私信 "));
 }
 function conversationSample(w) {

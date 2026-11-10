@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.12.1" category="social" icon="tv"
+     version="1.12.2" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -1140,7 +1140,7 @@ function Messages() {
     features.message_replies && features.message_mentions && n && n.reply === null && n.at === null && n.combined !== null
       ? note("回复及 @ 合并计数：" + comma(n.combined), { key: "notice-combined" }) : null);
 }
-function IdentityHeader(now) {
+function IdentityHeader() {
   return h("Row", { width: "100%", alignItems: "center", gap: 12, shrink: 0 },
     h("ButtonBase", { key: "login-start", width: 40, height: 40, padding: 0, radius: 20,
       background: "accentSubtle", alignItems: "center", justify: "center", onClick: () => startLogin(),
@@ -1148,17 +1148,15 @@ function IdentityHeader(now) {
       h("Avatar", { key: "account-avatar", name: account.name, ...(account.avatar ? { src: account.avatar } : {}),
         width: 40, height: 40, radius: 20, fit: "cover", label: account.name + "的头像" })),
     text(account.name, { key: "account-name", fontSize: 16, fontWeight: 500, grow: 1, minWidth: 0,
-      singleLine: true, tooltip: account.name, onClick: launch("https://space.bilibili.com/" + account.uid) }),
-    RefreshButton(now));
+      singleLine: true, tooltip: account.name, onClick: launch("https://space.bilibili.com/" + account.uid) }));
 }
 function RefreshButton(now) {
-  return h("ButtonBase", { key: "refresh", height: 32, paddingX: 10, paddingY: 0, radius: 16,
-    background: "surfaceHover", disabled: loading || !!inputError, onClick: () => requestRefresh(),
-    label: loading ? "正在刷新" : "刷新", tooltip: loading ? "正在刷新" : "刷新", shrink: 0,
-    hover: { background: "surfacePressed" }, focusRing: true, ...pressStyle("refresh") },
-    h("Row", { gap: 6, alignItems: "center" },
-      h("Icon", { key: "refresh-icon", svg: REFRESH_ICON, width: 16, height: 16, fontSize: 16,
-        rotate: refreshAngle(now), transformOrigin: [0.5, 0.5] }), text("刷新", { fontSize: 13, fontWeight: 500 })));
+  return h("ButtonBase", { key: "refresh", width: 24, height: 24, padding: 4, radius: 6,
+    disabled: loading || !!inputError, onClick: () => requestRefresh(),
+    label: loading ? "正在刷新" : "刷新", tooltip: loading ? "正在刷新" : "刷新（Ctrl/Cmd+R）", shrink: 0,
+    textColor: "textMuted", hover: { background: "surfaceHover", textColor: "text" }, focusRing: true, ...pressStyle("refresh") },
+    h("Icon", { key: "refresh-icon", svg: REFRESH_ICON, width: 12, height: 12, fontSize: 12,
+      rotate: refreshAngle(now), transformOrigin: [0.5, 0.5] }));
 }
 function pageMenu() {
   return tabs.filter(item => item.id !== "account" || features.identity || features.followers || features.level)
@@ -1235,7 +1233,7 @@ function panel(env) {
     width: "100%", height: "100%", maxWidth: 320, minHeight: 0, minWidth: 0,
     padding: 16, gap: 12, radius: 24, background: "surface", textColor: "text", fontSize: 13,
     contextMenu, shortcuts: { "CmdOrCtrl+R": () => requestRefresh() } },
-    connected ? IdentityHeader(now) : h("Row", { gap: 12, alignItems: "center", width: "100%" },
+    connected ? IdentityHeader() : h("Row", { gap: 12, alignItems: "center", width: "100%" },
       h("Box", { width: 40, height: 40, radius: 20, background: "accentSubtle", alignItems: "center", justify: "center" },
         h("Icon", { svg: MARK, width: 22, height: 22, fontSize: 22, textColor: "accent" })),
       h("Column", { gap: 0, grow: 1, minWidth: 0 },
@@ -1248,7 +1246,7 @@ function panel(env) {
           h("Loading", { size: 24, label: "读取账户" }), note("正在读取账户…"))),
     h("Box", { height: 1, width: "100%", linearGradient: { stops: [
       { at: 0, color: "surface" }, { at: 0.2, color: "border" }, { at: 0.8, color: "border" }, { at: 1, color: "surface" }] } }),
-    connected ? h("Row", { key: "refresh-cadence", width: "100%", height: 16, gap: 12, alignItems: "center", shrink: 0,
+    connected ? h("Row", { key: "refresh-cadence", width: "100%", height: 24, gap: 8, alignItems: "center", shrink: 0,
       label: "自动刷新：整体每 6 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
       tooltip: ["自动刷新：整体每 6 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
         "账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
@@ -1257,7 +1255,7 @@ function panel(env) {
         privateEnabled() ? "私信 " + stamp(times.private) : null,
         privateEnabled() && privateDisplay === "list" ? "会话 " + stamp(times.conversations) : null,
         notificationsEnabled() ? "通知 " + stamp(times.notifications) : null].filter(Boolean).join("\n") },
-      h("Icon", { svg: REFRESH_ICON, width: 12, height: 12, fontSize: 12, textColor: "textMuted", shrink: 0 }),
+      RefreshButton(now),
       h("Row", { gap: 4, alignItems: "center" },
         note("整体", { fontSize: 11, singleLine: true }),
         text("6 小时", { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })),
