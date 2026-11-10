@@ -1569,8 +1569,8 @@ const dynamicIDs = w => nodes(w.render()).map(node => node.props?.key || node.ke
   .filter(key => typeof key === "string" && key.startsWith("dynamic-item-"));
 const dynamicRequests = w => w.requests.filter(({ url }) => url.pathname === DYNAMIC);
 const change = (w, key, next) => find(w.render(), key).props.onChange(next);
-const menuEntries = w => find(w.render(), "menu-button").props.menu;
-const menuPages = w => menuEntries(w).filter(item => ["消息", "视频", "账户", "动态"].includes(item.label)).map(item => item.label);
+const menuPages = w => nodes(w.render()).filter(node => node.type === "Part" && node.props?.name === "tab")
+  .map(node => node.children[0].props.text);
 function openDynamicFilter(w) {
   w.select("dynamic");
   w.click("dynamic-filter-toggle");
@@ -1583,7 +1583,7 @@ describe("native menu settings", () => {
     await w.refresh();
     w.select("videos");
     const before = w.requests.length;
-    w.env.inputs.menu_order = "account,videos,messages,dynamic";
+    Object.assign(w.env.inputs, { order_account: 0, order_videos: 5, order_messages: 10, order_dynamic: 20 });
     expect(menuPages(w)).toEqual(["账户", "视频", "消息", "动态"]);
     expect(find(w.render(), "page-videos").props.ignoreInput).toBe(false);
     expect(w.requests.length).toBe(before);
@@ -1593,20 +1593,34 @@ describe("native menu settings", () => {
     expect(find(restarted.render(), "page-account").props.ignoreInput).toBe(false);
   });
 
-  test("hiding the tab strip retains menu navigation and enabled requests", async () => {
-    const w = worker();
+  test("one rank change moves a page and equal ranks use the fixed page order", async () => {
+    const feed = dynamicFeed();
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
     await w.refresh();
-    w.env.inputs.show_tab_bar = false;
-    expect(find(w.render(), "navigation")).toBeUndefined();
-    menuEntries(w).find(item => item.label === "账户").onClick();
-    expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
-    const before = w.requests.length;
+    w.env.inputs.order_videos = 15;
+    expect(menuPages(w)).toEqual(["消息", "视频", "动态", "账户"]);
+    Object.assign(w.env.inputs, { order_messages: 0, order_dynamic: 0, order_videos: 0, order_account: -1 });
+    expect(menuPages(w)).toEqual(["账户", "消息", "动态", "视频"]);
+    w.env.inputs.order_account = 0;
+    expect(menuPages(w)).toEqual(["消息", "动态", "视频", "账户"]);
+    w.env.inputs.order_dynamic = null;
+    expect(menuPages(w)).toEqual(["消息", "视频", "账户", "动态"]);
+  });
+
+  test("tabs remain reachable despite the removed visibility input and hide only when one page remains", async () => {
+    const w = worker({ inputs: { show_tab_bar: false } });
     await w.refresh();
-    const requested = w.requests.slice(before).map(({ url }) => url.pathname);
-    for (const path of [NAV, FANS, LIST, PRIVATE]) expect(requested).toContain(path);
-    w.env.inputs.show_tab_bar = true;
     expect(find(w.render(), "navigation")).toBeDefined();
+    expect(find(w.render(), "menu-button")).toBeUndefined();
+    w.select("videos");
+    w.env.inputs.show_videos = false;
+    w.env.inputs.show_messages = false;
+    expect(find(w.render(), "navigation")).toBeUndefined();
     expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
+    w.env.inputs.show_messages = true;
+    expect(find(w.render(), "navigation")).toBeDefined();
+    w.select("messages");
+    expect(find(w.render(), "page-messages").props.ignoreInput).toBe(false);
   });
 
   test("page switches suppress requests, fall back to an enabled page and preserve subordinate choices", async () => {
@@ -1643,8 +1657,8 @@ describe("native menu settings", () => {
     const store = new Map([["navigation:v1", JSON.stringify({ order: ["account", "videos", "messages", "dynamic"],
       hidden: ["messages", "videos", "account", "dynamic"], visible: false })]]);
     const feed = dynamicFeed();
-    const w = worker({ store, inputs: { menu_order: "dynamic,messages,videos,account", show_dynamic: true,
-      show_tab_bar: true, show_account: true }, intercept: feed.intercept });
+    const w = worker({ store, inputs: { order_dynamic: -1, show_dynamic: true,
+      menu_order: "account,videos,messages,dynamic", show_account: true }, intercept: feed.intercept });
     await w.refresh();
     expect(menuPages(w)).toEqual(["动态", "消息", "视频", "账户"]);
     expect(find(w.render(), "page-dynamic").props.ignoreInput).toBe(false);

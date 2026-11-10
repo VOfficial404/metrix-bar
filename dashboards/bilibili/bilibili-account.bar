@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.9.0" category="social" icon="tv"
+     version="1.10.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -13,33 +13,10 @@
     <network origin="https://i2.hdslb.com" />
   </permissions>
   <inputs>
-    <input name="show_tab_bar" type="bool" label="菜单 · 显示标签栏" default="true" help="关闭后仍可通过顶部菜单切换页面。" />
-    <input name="menu_order" type="select" label="菜单 · 页面顺序" default="messages,dynamic,videos,account">
-      <option value="messages,dynamic,videos,account" label="消息 → 动态 → 视频 → 账户" />
-      <option value="messages,dynamic,account,videos" label="消息 → 动态 → 账户 → 视频" />
-      <option value="messages,videos,dynamic,account" label="消息 → 视频 → 动态 → 账户" />
-      <option value="messages,videos,account,dynamic" label="消息 → 视频 → 账户 → 动态" />
-      <option value="messages,account,dynamic,videos" label="消息 → 账户 → 动态 → 视频" />
-      <option value="messages,account,videos,dynamic" label="消息 → 账户 → 视频 → 动态" />
-      <option value="dynamic,messages,videos,account" label="动态 → 消息 → 视频 → 账户" />
-      <option value="dynamic,messages,account,videos" label="动态 → 消息 → 账户 → 视频" />
-      <option value="dynamic,videos,messages,account" label="动态 → 视频 → 消息 → 账户" />
-      <option value="dynamic,videos,account,messages" label="动态 → 视频 → 账户 → 消息" />
-      <option value="dynamic,account,messages,videos" label="动态 → 账户 → 消息 → 视频" />
-      <option value="dynamic,account,videos,messages" label="动态 → 账户 → 视频 → 消息" />
-      <option value="videos,messages,dynamic,account" label="视频 → 消息 → 动态 → 账户" />
-      <option value="videos,messages,account,dynamic" label="视频 → 消息 → 账户 → 动态" />
-      <option value="videos,dynamic,messages,account" label="视频 → 动态 → 消息 → 账户" />
-      <option value="videos,dynamic,account,messages" label="视频 → 动态 → 账户 → 消息" />
-      <option value="videos,account,messages,dynamic" label="视频 → 账户 → 消息 → 动态" />
-      <option value="videos,account,dynamic,messages" label="视频 → 账户 → 动态 → 消息" />
-      <option value="account,messages,dynamic,videos" label="账户 → 消息 → 动态 → 视频" />
-      <option value="account,messages,videos,dynamic" label="账户 → 消息 → 视频 → 动态" />
-      <option value="account,dynamic,messages,videos" label="账户 → 动态 → 消息 → 视频" />
-      <option value="account,dynamic,videos,messages" label="账户 → 动态 → 视频 → 消息" />
-      <option value="account,videos,messages,dynamic" label="账户 → 视频 → 消息 → 动态" />
-      <option value="account,videos,dynamic,messages" label="账户 → 视频 → 动态 → 消息" />
-    </input>
+    <input name="order_messages" type="integer" label="排序 · 消息" default="10" help="数字越小越靠前；相同时按消息、动态、视频、账户排列。" />
+    <input name="order_dynamic" type="integer" label="排序 · 动态" default="20" />
+    <input name="order_videos" type="integer" label="排序 · 视频" default="30" />
+    <input name="order_account" type="integer" label="排序 · 账户" default="40" />
     <input name="show_account" type="bool" label="账户 · 启用账户页" default="true" help="关闭账户页及托盘粉丝统计，保留下面的细分选择。" />
     <input name="show_identity" type="bool" label="账户 · UID 与硬币" default="true" />
     <input name="show_followers" type="bool" label="账户 · 粉丝与关注" default="true" />
@@ -150,11 +127,11 @@ let times = {}, errors = {}, loading = false, inflight = null, inflightGeneratio
 let tab = "messages";
 // --stage-* maps to native background/text/textMuted/border/surface/accent/accentText.
 const TABS = [{ id: "messages", label: "消息" }, { id: "dynamic", label: "动态" }, { id: "videos", label: "视频" }, { id: "account", label: "账户" }];
-const DEFAULT_MENU_ORDER = "messages,dynamic,videos,account";
-let menuOrder = DEFAULT_MENU_ORDER, showTabBar = true;
+let menuRanks = TABS.map((_, index) => (index + 1) * 10);
 function updateTabs(initial = false) {
-  tabs = menuOrder.split(",").map(id => TABS.find(item => item.id === id)).filter(item => item.id === "account"
-    ? features.identity || features.followers || features.level : item.id === "messages" ? messagesEnabled() : features[item.id]);
+  tabs = TABS.slice().sort((a, b) => menuRanks[TABS.indexOf(a)] - menuRanks[TABS.indexOf(b)])
+    .filter(item => item.id === "account" ? features.identity || features.followers || features.level
+      : item.id === "messages" ? messagesEnabled() : features[item.id]);
   if (!tabs.length) tabs = [TABS.find(item => item.id === "account")];
   if (initial || !tabs.some(item => item.id === tab)) tab = tabs[0].id;
   stopMotion();
@@ -448,11 +425,10 @@ function sync(env) {
   const nextPrivateLimit = [3, 5, 10].includes(requestedPrivateLimit) ? requestedPrivateLimit : 5;
   const nextFeatures = Object.fromEntries(FEATURE_KEYS.map(key => [key, env.inputs["show_" + key] !== false]));
   if (!nextFeatures.account) for (const key of ["identity", "followers", "level"]) nextFeatures[key] = false;
-  const nextMenuOrder = env.inputs.menu_order || DEFAULT_MENU_ORDER;
-  const nextShowTabBar = env.inputs.show_tab_bar !== false;
-  const menuChanged = nextMenuOrder !== menuOrder || nextShowTabBar !== showTabBar;
-  menuOrder = nextMenuOrder;
-  showTabBar = nextShowTabBar;
+  const nextMenuRanks = TABS.map((item, index) => Number.isSafeInteger(env.inputs["order_" + item.id])
+    ? env.inputs["order_" + item.id] : (index + 1) * 10);
+  const menuChanged = nextMenuRanks.some((rank, index) => rank !== menuRanks[index]);
+  if (menuChanged) menuRanks = nextMenuRanks;
   const featuresChanged = FEATURE_KEYS.some(key => nextFeatures[key] !== features[key]);
   if (initialized && next === credential && limit === videoLimit && rate === privateRate
       && display === privateDisplay && nextPrivateLimit === privateLimit && !featuresChanged) {
@@ -1126,7 +1102,6 @@ function Messages() {
       ? note("回复及 @ 合并计数：" + comma(n.combined), { key: "notice-combined" }) : null);
 }
 function IdentityHeader(now) {
-  const menu = pageMenu();
   return h("Row", { width: "100%", alignItems: "center", gap: 12, shrink: 0 },
     h("ButtonBase", { key: "login-start", width: 40, height: 40, padding: 0, radius: 20,
       background: "accentSubtle", alignItems: "center", justify: "center", onClick: () => startLogin(),
@@ -1135,7 +1110,6 @@ function IdentityHeader(now) {
         width: 40, height: 40, radius: 20, fit: "cover", label: account.name + "的头像" })),
     text(account.name, { key: "account-name", fontSize: 16, fontWeight: 500, grow: 1, minWidth: 0,
       singleLine: true, tooltip: account.name, onClick: launch("https://space.bilibili.com/" + account.uid) }),
-    menu.length ? h("MenuButton", { key: "menu-button", label: "菜单", shrink: 0, menu }) : null,
     RefreshButton(now));
 }
 function RefreshButton(now) {
@@ -1225,7 +1199,7 @@ function panel(env) {
         h("Icon", { svg: MARK, width: 22, height: 22, fontSize: 22, textColor: "accent" })),
       h("Column", { gap: 0, grow: 1, minWidth: 0 },
         text("哔哩哔哩", { fontSize: 16, fontWeight: 500 }), note(account ? "切换账户" : "账户登录"))),
-    connected && showTabBar && tabs.length > 1 ? Navigation(width, now) : null,
+    connected && tabs.length > 1 ? Navigation(width, now) : null,
     connected ? sectionError("account") : null,
     connected ? Pages(now) : h("Scroll", { grow: 1, minHeight: 0, width: "100%" },
       login.phase !== "idle" || inputError || errors.account ? LoginPanel(width)
