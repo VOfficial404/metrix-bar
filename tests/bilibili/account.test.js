@@ -1930,6 +1930,31 @@ describe("dynamic feed and author preferences", () => {
     expect(find(w.render(), "dynamic-user-" + "71002")).toBeDefined();
   });
 
+  test("dynamic numeric and decimal-string timestamps render identically while invalid times preserve prior cards", async () => {
+    const item = dynamicItem();
+    item.type = "DYNAMIC_TYPE_AV";
+    const feed = dynamicFeed([item]);
+    const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });
+    await w.refresh();
+    const cardText = () => nodes({ panel: find(w.render(), "dynamic-item-" + item.id_str) })
+      .map(node => node.props?.text).filter(Boolean);
+    const numericText = cardText();
+    item.modules.module_author.pub_ts = "1794222000";
+    await w.refresh();
+    expect(dynamicIDs(w)).toEqual(["dynamic-item-" + item.id_str]);
+    expect(cardText()).toEqual(numericText);
+    expect(find(w.render(), "error-dynamic")).toBeUndefined();
+    for (const invalidTime of ["", " ", "1e9", "1794222000.5", "-1", "invalid", "9007199254740992", null, true, -1, 1.5]) {
+      const malformed = dynamicItem(DYNAMIC_IDS[2]);
+      malformed.modules.module_author.pub_ts = invalidTime;
+      feed.state.items = [malformed];
+      await w.refresh();
+      expect(dynamicIDs(w)).toEqual(["dynamic-item-" + item.id_str]);
+      expect(cardText()).toEqual(numericText);
+      expect(find(w.render(), "error-dynamic")).toBeDefined();
+    }
+  });
+
   test("failed refresh and malformed pages preserve loaded cards until a successful replacement", async () => {
     const feed = dynamicFeed();
     const w = worker({ inputs: { show_dynamic: true }, intercept: feed.intercept });

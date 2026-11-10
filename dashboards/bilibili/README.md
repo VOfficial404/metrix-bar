@@ -1,6 +1,6 @@
 # BiliBili
 
-[下载当前源码](bilibili-account.bar) · [看板源索引](../../registry/index.json) · 1.8.0（2026-11-10） · 整体每 6 小时刷新 · 私信默认每 10 分钟刷新
+[下载当前源码](bilibili-account.bar) · [看板源索引](../../registry/index.json) · 1.8.1（2026-11-10） · 整体每 6 小时刷新 · 私信默认每 10 分钟刷新
 
 ## 登录
 

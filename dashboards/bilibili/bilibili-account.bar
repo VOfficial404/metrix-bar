@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.8.0" category="social" icon="tv"
+     version="1.8.1" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="6h" material="solid">
@@ -599,13 +599,15 @@ function readDynamics(data) {
   for (const item of data.items) {
     if (item?.visible === false) continue;
     const author = item?.modules?.module_author;
+    const published = typeof author?.pub_ts === "string" && /^\d{1,16}$/.test(author.pub_ts)
+      ? Number(author.pub_ts) : author?.pub_ts;
     if (typeof item?.id_str !== "string" || !/^[1-9]\d{0,31}$/.test(item.id_str) || !author
-        || !count(author.mid) || !author.mid || typeof author.name !== "string" || !count(author.pub_ts)
-        || !Number.isSafeInteger(author.pub_ts * 1000) || !item.modules.module_dynamic) invalid();
+        || !count(author.mid) || !author.mid || typeof author.name !== "string" || !count(published)
+        || !Number.isSafeInteger(published * 1000) || !item.modules.module_dynamic) invalid();
     if (seen.has(item.id_str)) continue;
     seen.add(item.id_str);
     items.push({ id: item.id_str, uid: String(author.mid), name: author.name.trim() || "UID " + author.mid,
-      avatar: imageURL(author.face), at: author.pub_ts * 1000, text: dynamicExcerpt(item) });
+      avatar: imageURL(author.face), at: published * 1000, text: dynamicExcerpt(item) });
   }
   return { items, hasMore: data.has_more, offset: data.has_more ? data.offset : "" };
 }
