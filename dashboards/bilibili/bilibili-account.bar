@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.14.2" category="social" icon="tv"
+     version="1.15.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -124,6 +124,7 @@ const stamp = time => {
 const launch = url => () => $metrix.openURL(url);
 let credential = "", inputError = "", videoLimit = 5, initialized = false, generation = 0;
 let account = null, followers = null, videos = null, privateMessages = null, notifications = null;
+let followerDaily = null;
 let privateDisplay = "summary", privateLimit = 5, privateCardSize = "normal", conversations = null;
 let times = {}, errors = {}, loading = false, inflight = null, inflightGeneration = -1, refreshController = null;
 let tab = "messages";
@@ -479,6 +480,7 @@ function sync(env) {
     : /[\s;\r\n]/.test(next) || /^SESSDATA=/i.test(next) ? "只填写 SESSDATA 的值，不要填写整段 Cookie。" : "";
   if (changedAccount) {
     account = followers = videos = privateMessages = notifications = conversations = null;
+    followerDaily = null;
     dynamics = null;
     dynamicFilterUID = null;
     dynamicFilter = { mode: "all", uids: [] };
@@ -489,9 +491,11 @@ function sync(env) {
     privateAttemptAt = 0;
   }
   if (!features.followers) {
-    followers = null;
+    followers = followerDaily = null;
     delete times.followers;
     delete errors.followers;
+    delete times.followerDaily;
+    delete errors.followerDaily;
   }
   if (!features.videos) {
     videos = null;
@@ -561,17 +565,21 @@ function readAccount(data) {
   return { uid: data.mid, name: data.uname, avatar: imageURL(data.face), senior: data.is_senior_member === 1,
     coins: data.money, level: lv.current_level, xp: lv.current_exp, floor: lv.current_min, next: maxLevel ? null : lv.next_exp };
 }
-function sampleFollowers(uid, data) {
+function readFollowers(uid, data) {
   if (data.mid !== uid || !count(data.follower) || !count(data.following)) invalid();
-  const key = "followers:v1:" + uid;
-  let previous = null;
-  try { previous = JSON.parse(localStorage.getItem(key) || "null"); }
-  catch { /* A missing/corrupt sample establishes a new baseline. */ }
-  const usable = previous && count(previous.count) && metric(previous.at) && previous.at <= Date.now();
-  const sample = { count: data.follower, at: Date.now(),
-    delta: usable ? data.follower - previous.count : null, since: usable ? previous.at : null };
-  localStorage.setItem(key, JSON.stringify(sample));
-  return { ...sample, following: data.following };
+  return { count: data.follower, following: data.following };
+}
+function yesterdayDate(now = Date.now()) {
+  return new Date(now + 8 * 3600000 - 86400000).toISOString().slice(0, 10);
+}
+function readFollowerDaily(data) {
+  if (!count(data.follow) || !count(data.unfollow) || !Number.isSafeInteger(data.log_date)
+      || !/^\d{8}$/.test(String(data.log_date))) invalid();
+  const date = String(data.log_date).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3");
+  const parsed = Date.parse(date + "T00:00:00Z");
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString().slice(0, 10) !== date
+      || date > yesterdayDate()) invalid();
+  return { follow: data.follow, unfollow: data.unfollow, net: data.follow - data.unfollow, date };
 }
 function readPrivate(data) {
   if (!count(data.follow_unread) || !count(data.unfollow_unread)) invalid();
@@ -819,24 +827,19 @@ function sampleVideos(uid, rows) {
 async function load(session, limit, version, signal) {
   const next = readAccount(await get(API, "/x/web-interface/nav", session, signal));
   if (version !== generation) return;
+  if (account && account.uid !== next.uid) {
+    followers = followerDaily = null;
+    for (const key of ["followers", "followerDaily"]) { delete times[key]; delete errors[key]; }
+  }
   account = next;
   times.account = Date.now();
   delete errors.account;
   restoreDynamicFilter(next.uid);
-  // Restore the previous sample only after confirming the logged-in UID.
-  if (features.followers && !followers) {
-    try {
-      const saved = JSON.parse(localStorage.getItem("followers:v1:" + next.uid) || "null");
-      if (saved && count(saved.count) && metric(saved.at)) {
-        followers = { ...saved, following: null };
-        times.followers = saved.at;
-      }
-    } catch {}
-  }
   const privateRefresh = privateEnabled() ? refreshPrivate(session, version, signal) : Promise.resolve();
   const tasks = [];
   if (features.followers) tasks.push(
-    ["followers", () => get(API, "/x/relation/stat?vmid=" + next.uid, session, signal), data => { followers = sampleFollowers(next.uid, data); }]);
+    ["followers", () => get(API, "/x/relation/stat?vmid=" + next.uid, session, signal), data => { followers = readFollowers(next.uid, data); }],
+    ["followerDaily", () => get(MEMBER, "/x/web/data/v2/fans/stat/num?period=-1", session, signal), data => { followerDaily = readFollowerDaily(data); }]);
   if (notificationsEnabled()) tasks.push(
     ["notifications", () => get(IM, "/x/im/web/msgfeed/unread?build=0&mobi_app=web", session, signal), data => { notifications = readNotifications(data); }]);
   const results = await Promise.allSettled(tasks.map(async ([key, request, apply]) => {
@@ -942,7 +945,6 @@ function tile(label, value, key, options = {}) {
     note(label), text(value, { key, fontSize: 16, lineHeight: 1.375, textColor: options.color || "text", fontFeatures: "tnum", wrap: true }));
   return h(options.onClick ? "ButtonBase" : "Column", { key: "tile-" + key,
     padding: 12, radius: 12, background: "surfaceHover", width: "100%", minWidth: 0,
-    ...(options.wide ? { columnSpan: 2 } : {}),
     ...(options.onClick ? { ...pressStyle(), onClick: options.onClick, label: label + " " + value,
       hover: { background: "surfacePressed" }, focusRing: true } : {}),
     ...(options.tooltip ? { tooltip: options.tooltip } : {}) }, content);
@@ -953,11 +955,10 @@ function sectionError(key) {
     note(times[key] ? "上次成功：" + stamp(times[key]) : "此项尚无可用数据")) : null;
 }
 function Account(now) {
-  const delta = followers?.delta;
+  const daily = followerDaily?.date === yesterdayDate(now) ? followerDaily : null;
   const levelColor = LEVEL_COLORS[Math.min(account.level, 6)];
   const progress = account.next == null ? 1 : clamp((account.xp - account.floor) / (account.next - account.floor));
   const entered = motionAllowed() && barStarted !== null ? smoothOut(clamp((now - barStarted) / MOTION.bar)) : 1;
-  const period = followers?.since ? "对比时间：" + stamp(followers.since) + " → " + stamp(followers.at) : "首次成功采样建立基线，按 UID 保存在本机";
   return h("Column", { gap: 8, width: "100%" },
     features.identity ? h("Row", { key: "identity-details", height: 34, paddingX: 10, radius: 10, background: "surfaceHover",
       width: "100%", minWidth: 0, gap: 10, alignItems: "center" },
@@ -970,10 +971,21 @@ function Account(now) {
         text(comma(account.coins), { key: "coins", fontSize: 13, fontWeight: 600, singleLine: true, fontFeatures: "tnum" }))) : null,
     features.followers ? sectionError("followers") : null,
     features.followers ? h("Grid", { columns: 2, gap: 8, width: "100%" },
-      tile("粉丝总数", comma(followers?.count), "followers", { wide: true }),
-      tile("较上次净变化", !followers ? "—" : delta == null ? "首次建立基线" : signed(delta), "follower-delta",
-        { color: delta > 0 ? "success" : delta < 0 ? "danger" : "text", tooltip: period }),
+      tile("粉丝总数", comma(followers?.count), "followers"),
       tile("关注数量", comma(followers?.following), "following")) : null,
+    features.followers ? sectionError("followerDaily") : null,
+    features.followers ? h("Column", { gap: 8, padding: 12, radius: 12, background: "surfaceHover", width: "100%" },
+      [["昨日新增关注", "follower-follow", daily?.follow, "text"],
+        ["昨日取关", "follower-unfollow", daily?.unfollow, daily?.unfollow > 0 ? "danger" : "text"],
+        ["昨日净增", "follower-net", daily?.net, daily?.net > 0 ? "success" : daily?.net < 0 ? "danger" : "text"]]
+        .map(([label, key, value, color]) => h("Row", { width: "100%", alignItems: "center", gap: 8 },
+          note(label, { grow: 1, minWidth: 0 }),
+          text(value == null ? "—" : key === "follower-net" ? signed(value) : comma(value),
+            { key, fontSize: 16, fontFeatures: "tnum", textColor: color, singleLine: true }))),
+      note(daily ? daily.date + " · B 站统计"
+        : "昨日统计暂不可用" + (followerDaily ? " · 最近统计 " + followerDaily.date : ""),
+        { key: "follower-date", fontSize: 11, wrap: true,
+          tooltip: "按北京时间自然日统计；昨日净增 = B 站昨日新增关注 − 昨日取关。服务端更新可能延迟。" })) : null,
     features.level ? h("Column", { gap: 8, padding: 12, radius: 12, background: "surfaceHover", width: "100%" },
       h("Row", { alignItems: "center", gap: 8, width: "100%" },
         text("Lv." + account.level, { key: "level", fontSize: 12, fontWeight: 600, height: 20,
@@ -1232,7 +1244,7 @@ function panel(env) {
   const now = Date.now(), connected = account && login.phase === "idle" && !inputError;
   const width = Math.max(200, Math.min(320, env.viewport?.width || 320)) - 32;
   const compactAccount = tabs.length === 1 && tabs[0].id === "account" && !features.followers;
-  const connectedHeight = tab === "dynamic" ? 440 : compactAccount ? (features.level ? 280 : 208) : 400;
+  const connectedHeight = tab === "dynamic" ? 440 : tab === "account" && features.followers ? 510 : compactAccount ? (features.level ? 280 : 208) : 400;
   const contextMenu = [{ label: "重新扫码登录", onClick: () => startLogin() },
     { label: "打开个人空间", disabled: !account, onClick: launch(account ? "https://space.bilibili.com/" + account.uid : "https://www.bilibili.com/") }];
   const identity = account ? `${account.uid}:${account.level}:${account.xp}` : "";
@@ -1263,6 +1275,7 @@ function panel(env) {
       label: "自动刷新：整体每 " + globalRefreshLabel() + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
       tooltip: ["自动刷新：整体每 " + globalRefreshLabel() + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
         "账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
+        features.followers ? "昨日粉丝统计 " + stamp(times.followerDaily) : null,
         features.videos ? "视频 " + stamp(times.videos) : null,
         features.dynamic ? "动态 " + stamp(times.dynamic) : null,
         privateEnabled() ? "私信 " + stamp(times.private) : null,
@@ -1281,9 +1294,9 @@ export default {
   async scheduled(env) { sync(env); await refresh(); },
   render(env) {
     sync(env);
-    const delta = followers?.delta;
+    const daily = followerDaily?.date === yesterdayDate() ? followerDaily : null;
     const pages = pageMenu();
-    const title = features.followers && followers ? "粉丝 " + comma(followers.count) + (delta ? " (" + signed(delta) + ")" : "") : account?.name || "哔哩哔哩";
+    const title = features.followers && followers ? "粉丝 " + comma(followers.count) + (daily ? " (昨日 " + signed(daily.net) + ")" : "") : account?.name || "哔哩哔哩";
     return { tray: { icon: "data:image/svg+xml," + encodeURIComponent(MARK), iconTemplate: true, title,
       tooltip: account ? account.name + (features.identity ? " · UID " + account.uid : "") : "连接自己的 B 站账户",
       error: inputError || Object.values(errors).join("；"),

@@ -9,6 +9,7 @@ const loginFixture = JSON.parse(readFileSync(new URL("./fixtures/login.json", im
 const qrGeneration = () => JSON.parse(loginFixture.http[0].body);
 const NAV = "/x/web-interface/nav";
 const FANS = "/x/relation/stat";
+const FAN_DAILY = "/x/web/data/v2/fans/stat/num";
 const LIST = "/x/web/archives";
 const VIEW = "/x/web-interface/view";
 const ok = data => ({ code: 0, data });
@@ -225,28 +226,25 @@ describe("Bilibili dashboard behavior", () => {
     expect(w.render().tray.error).toBe("");
   });
 
-  test("disabling followers clears old errors and resumes from the last successful sample", async () => {
-    let followers = 1200, fail = false;
-    const w = worker({ intercept: url => url.pathname === FANS
-      ? fail ? { code: -352 } : ok({ mid: 12345, follower: followers, following: 88 }) : undefined });
+  test("disabling followers clears both requests and errors, then reloads server daily counts", async () => {
+    let fail = false;
+    const w = worker({ intercept: url => fail && [FANS, FAN_DAILY].includes(url.pathname) ? { code: -352 } : undefined });
     await w.refresh();
-    const saved = w.store.get("followers:v1:12345");
     fail = true;
     await w.refresh();
     expect(w.render().tray.error).toContain("风控");
     w.env.inputs.show_followers = false;
     const before = w.requests.length;
     await w.refresh();
-    expect(w.requests.slice(before).some(({ url }) => url.pathname === FANS)).toBe(false);
+    expect(w.requests.slice(before).some(({ url }) => [FANS, FAN_DAILY].includes(url.pathname))).toBe(false);
     expect(find(w.render(), "followers")).toBeUndefined();
+    expect(find(w.render(), "follower-net")).toBeUndefined();
     expect(w.render().tray.title).not.toContain("粉丝");
     expect(w.render().tray.error).toBe("");
-    expect(w.store.get("followers:v1:12345")).toBe(saved);
-    followers = 1400;
     fail = false;
     w.env.inputs.show_followers = true;
     await w.refresh();
-    expect(value(w, "follower-delta")).toBe("+200");
+    expect(value(w, "follower-net")).toBe("-11");
   });
 
   test("visible tab indices stay correct when account modules or the active page are disabled", async () => {
@@ -395,32 +393,101 @@ describe("Bilibili dashboard behavior", () => {
     expect(find(w.render(), "notice-combined")).toBeDefined();
   });
 
-  test("followers preserve the last successful baseline through failure and restart, including losses", async () => {
-    let followers = 1200, fail = false;
-    const intercept = url => url.pathname === FANS
-      ? fail ? { code: -352, message: "secret must not be displayed" } : ok({ mid: 12345, follower: followers, following: 88 })
-      : undefined;
-    const w = worker({ intercept });
+  test("daily counts come from the server on first load and restart, independently of follower totals", async () => {
+    let total = 1200;
+    const store = new Map([["followers:v1:12345", JSON.stringify({ count: 9999, at: Date.parse(fixture.now) - 1000, delta: 999 })]]);
+    const intercept = url => url.pathname === FANS ? ok({ mid: 12345, follower: total, following: 88 }) : undefined;
+    const w = worker({ store, intercept });
     await w.refresh();
-    expect(value(w, "follower-delta")).toBe("首次建立基线");
-    w.clock.now += 21600000;
-    followers = 1212;
+    expect(value(w, "follower-follow")).toBe("7");
+    expect(value(w, "follower-unfollow")).toBe("18");
+    expect(value(w, "follower-net")).toBe("-11");
+    expect(value(w, "follower-date")).toContain("2026-11-08");
+    expect(w.render().tray.title).toContain("(昨日 -11)");
+    total = 2400;
     await w.refresh();
-    expect(value(w, "follower-delta")).toBe("+12");
-    const saved = w.store.get("followers:v1:12345");
+    expect(value(w, "followers")).toBe("2,400");
+    expect(value(w, "follower-net")).toBe("-11");
+    const restarted = worker({ store, intercept });
+    await restarted.refresh();
+    expect(value(restarted, "follower-net")).toBe("-11");
+    expect(restarted.storageWrites.some(({ key }) => key.startsWith("followers:"))).toBe(false);
+  });
+
+  test("daily endpoint failure preserves same-day statistics without blocking current totals", async () => {
+    let fail = false;
+    const w = worker({ intercept: url => fail && url.pathname === FAN_DAILY
+      ? { code: -352, message: "private service content" } : undefined });
+    await w.refresh();
     fail = true;
     await w.refresh();
-    expect(w.store.get("followers:v1:12345")).toBe(saved);
     expect(value(w, "followers")).toBe("1,212");
-    expect(w.render().tray.error).toContain("风控");
-    expect(w.render().tray.error).not.toContain("secret must not be displayed");
-    followers = 1201;
-    fail = false;
-    const restarted = worker({ store: w.store, intercept });
-    restarted.clock.now = w.clock.now + 21600000;
+    expect(value(w, "follower-net")).toBe("-11");
+    expect(value(w, "error-followerDaily")).toContain("风控");
+    expect(body(w)).not.toContain("private service content");
+    const restarted = worker({ store: w.store, intercept: url => url.pathname === FAN_DAILY ? { code: -101 } : undefined });
     await restarted.refresh();
-    expect(value(restarted, "follower-delta")).toBe("-11");
-    expect(restarted.render().tray.title).toContain("(-11)");
+    expect(value(restarted, "follower-net")).toBe("—");
+    expect(value(restarted, "followers")).toBe("1,200");
+  });
+
+  test("daily statistics expire at Beijing midnight and delayed server dates never masquerade as yesterday", async () => {
+    const w = worker();
+    w.clock.now = Date.parse("2026-11-09T15:59:59Z");
+    await w.refresh();
+    expect(value(w, "follower-net")).toBe("-11");
+    w.clock.now += 1000;
+    expect(value(w, "follower-net")).toBe("—");
+    expect(w.render().tray.title).not.toContain("昨日");
+    await w.refresh();
+    expect(value(w, "follower-date")).toContain("最近统计 2026-11-08");
+    expect(value(w, "follower-follow")).toBe("—");
+  });
+
+  test("daily counts distinguish zero and positive net growth from malformed data", async () => {
+    for (const [follow, unfollow, net] of [[0, 0, "0"], [24, 7, "+17"]]) {
+      const w = worker({ intercept: url => url.pathname === FAN_DAILY ? ok({ follow, unfollow, log_date: 20261108, all_fans: 9999 }) : undefined });
+      await w.refresh();
+      expect(value(w, "follower-net")).toBe(net);
+      expect(value(w, "follower-unfollow")).toBe(String(unfollow));
+    }
+    for (const bad of [{ follow: null }, { follow: "7" }, { unfollow: -1 }, { unfollow: 1.5 },
+      { follow: Number.MAX_SAFE_INTEGER + 1 }, { log_date: 20260230 }, { log_date: 20261109 }, { log_date: null }]) {
+      const w = worker({ intercept: url => url.pathname === FAN_DAILY ? ok({ follow: 7, unfollow: 18, log_date: 20261108, ...bad }) : undefined });
+      await w.refresh();
+      expect(value(w, "follower-net")).toBe("—");
+      expect(value(w, "error-followerDaily")).toContain("数据结构");
+      expect(value(w, "followers")).toBe("1,200");
+    }
+  });
+
+  test("a pending daily response cannot leak across credentials or a disabled account", async () => {
+    for (const disable of [false, true]) {
+      let release, entered;
+      const pending = new Promise(resolve => { release = resolve; });
+      const started = new Promise(resolve => { entered = resolve; });
+      const w = worker({ intercept: async (url, options) => {
+        const second = options.headers.Cookie === "SESSDATA=second-session";
+        if (url.pathname === FAN_DAILY) {
+          if (!second) { entered(); await pending; return ok({ follow: 999, unfollow: 0, log_date: 20261108 }); }
+          return { code: -101 };
+        }
+        if (second && url.pathname === NAV) return nav(67890);
+        if (second && url.pathname === FANS) return ok({ mid: 67890, follower: 7, following: 1 });
+        if (second && url.pathname === LIST) return ok({ arc_audits: [], page: { pn: 1, ps: 30, count: 0 } });
+      } });
+      const first = w.refresh();
+      await started;
+      if (disable) w.env.inputs.show_account = false;
+      else w.state.secret = "second-session";
+      w.render();
+      const second = w.refresh();
+      release();
+      await Promise.all([first, second]);
+      expect(w.render().tray.title).not.toContain("999");
+      if (disable) expect(find(w.render(), "follower-net")).toBeUndefined();
+      else expect(value(w, "follower-net")).toBe("—");
+    }
   });
 
   test("max level preserves XP and distinguishes hardcore membership from VIP", async () => {
@@ -551,7 +618,7 @@ describe("Bilibili dashboard behavior", () => {
     await Promise.all([firstRefresh, secondRefresh]);
     expect(value(w, "uid")).toBe("UID 67890");
     expect(value(w, "followers")).toBe("7");
-    expect(value(w, "follower-delta")).toBe("首次建立基线");
+    expect(value(w, "follower-net")).toBe("-11");
     expect(w.store.has("followers:v1:12345")).toBe(false);
   });
 
@@ -1749,7 +1816,7 @@ describe("native menu settings", () => {
     expect(find(w.render(), "page-account").props.ignoreInput).toBe(false);
     const before = w.requests.length;
     await w.refresh();
-    expect(w.requests.slice(before).map(({ url }) => url.pathname).sort()).toEqual([NAV, FANS].sort());
+    expect(w.requests.slice(before).map(({ url }) => url.pathname).sort()).toEqual([NAV, FANS, FAN_DAILY].sort());
     w.env.inputs.show_account = false;
     for (const key of ["uid", "coins", "followers", "level", "navigation"]) expect(find(w.render(), key)).toBeUndefined();
     expect(find(w.render(), "no-features")).toBeDefined();

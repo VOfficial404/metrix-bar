@@ -11,6 +11,10 @@
   },
   "http": [
     {
+      "url": "https://member.bilibili.com/x/web/data/v2/fans/stat/num?period=-1",
+      "body": "{\"code\":0,\"data\":{\"follow\":7,\"unfollow\":18,\"all_fans\":1200,\"log_date\":20261108}}"
+    },
+    {
       "url": "https://api.bilibili.com/x/web-interface/nav",
       "body": "{\"code\":0,\"data\":{\"isLogin\":true,\"mid\":12345,\"uname\":\"示例 UP 主\",\"money\":172.4,\"level_info\":{\"current_level\":6,\"current_min\":28800,\"current_exp\":50000,\"next_exp\":\"--\"},\"face\":\"http://i0.hdslb.com/bfs/face/fixture.png\",\"is_senior_member\":1}}"
     },
