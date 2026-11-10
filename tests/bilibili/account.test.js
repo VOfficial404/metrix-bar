@@ -51,6 +51,7 @@ function worker({ store = new Map(), intercept = () => undefined, secret = "fixt
   const requests = [];
   const openedURLs = [];
   const storageWrites = [];
+  const schedules = [];
   const clock = { now: Date.parse(fixture.now) };
   const timers = new Map();
   let timerID = 0;
@@ -73,6 +74,7 @@ function worker({ store = new Map(), intercept = () => undefined, secret = "fixt
       store.set(key, String(value));
     } },
     $metrix: { secret: () => state.secret, invalidate() {}, openURL: url => openedURLs.push(url),
+      schedule: delay => { schedules.push(delay); },
       async setSecret(name, value) {
         if (saveSecret) await saveSecret(name, value);
         state.saved.push({ name, value });
@@ -95,7 +97,7 @@ function worker({ store = new Map(), intercept = () => undefined, secret = "fixt
   runInContext(script.replace("export default", "globalThis.dashboard ="), context);
   const env = { inputs: { video_count: "3", show_dynamic: false, ...inputs }, reason: "manual" };
   return {
-    store, state, env, clock, requests, openedURLs, storageWrites,
+    store, state, env, clock, requests, openedURLs, storageWrites, schedules,
     render: () => context.dashboard.render(env),
     refresh: () => context.dashboard.scheduled(env),
     click: key => find(context.dashboard.render(env), key).props.onClick(),
@@ -843,6 +845,63 @@ describe("persistent per-video statistic changes", () => {
     await w.refresh();
     expect(value(w, deltaKey("BVDeltaA", "likes"))).toBe("+2");
     expect(value(w, deltaKey("BVDeltaA", "views"))).toBe("+100");
+  });
+});
+
+describe("configurable global refresh", () => {
+  test("unchanged renders do not postpone the global schedule and invalid inputs converge on the fallback", async () => {
+    const w = worker({ inputs: { global_refresh_minutes: 90 } });
+    await w.refresh();
+    expect(w.schedules).toEqual([]);
+    await w.event("lifecycle", { type: "start" });
+    await w.event("lifecycle", { type: "start" });
+    for (let i = 0; i < 5; i++) w.render();
+    expect(w.schedules).toEqual([5400000]);
+    w.env.inputs.global_refresh_minutes = 1;
+    w.render();
+    w.env.inputs.global_refresh_minutes = 1440;
+    w.render();
+    expect(w.schedules).toEqual([5400000, 60000, 86400000]);
+    for (const invalid of [null, 0, -1, 1441, 1.5, Number.MAX_SAFE_INTEGER, "30"]) {
+      w.env.inputs.global_refresh_minutes = invalid;
+      w.render();
+    }
+    expect(w.schedules).toEqual([5400000, 60000, 86400000, 3600000]);
+    w.env.inputs.global_refresh_minutes = 60;
+    w.render();
+    expect(w.schedules).toHaveLength(4);
+    await w.event("lifecycle", { type: "stop" });
+    w.env.inputs.global_refresh_minutes = 45;
+    w.render();
+    expect(w.schedules).toHaveLength(4);
+    await w.event("lifecycle", { type: "start" });
+    expect(w.schedules).toEqual([5400000, 60000, 86400000, 3600000, 2700000]);
+    await w.event("lifecycle", { type: "stop" });
+  });
+
+  test("global interval changes preserve the private timer deadline and in-flight request", async () => {
+    let release, signal, held = false;
+    const w = worker({ inputs: { private_refresh: "10m" }, intercept: (url, options) => url.pathname === PRIVATE && held
+      ? new Promise(resolve => { release = resolve; signal = options.signal; }) : undefined });
+    await w.refresh();
+    await w.event("lifecycle", { type: "start" });
+    await w.tick(300000);
+    w.env.inputs.global_refresh_minutes = 15;
+    w.render();
+    const before = w.requests.length;
+    held = true;
+    await w.tick(299999);
+    expect(w.requests).toHaveLength(before);
+    await w.tick(1);
+    expect(w.requests.slice(before).map(({ url }) => url.pathname)).toEqual([PRIVATE]);
+    w.env.inputs.global_refresh_minutes = 120;
+    w.render();
+    expect(signal.aborted).toBe(false);
+    release(privatePayload(12));
+    await w.flush();
+    expect(value(w, "private-total")).toBe("12");
+    expect(w.env.inputs.private_refresh).toBe("10m");
+    await w.event("lifecycle", { type: "stop" });
   });
 });
 

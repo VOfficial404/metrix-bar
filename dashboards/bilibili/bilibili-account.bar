@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.13.0" category="social" icon="tv"
+     version="1.14.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -13,6 +13,8 @@
     <network origin="https://i2.hdslb.com" />
   </permissions>
   <inputs>
+    <input name="global_refresh_minutes" type="integer" label="全局 · 刷新间隔（分钟）" default="60"
+           help="填写 1–1440 的整数，默认 60 分钟；清空或超出范围时使用 60 分钟。更新所有已启用模块，不改变私信独立刷新设置。" />
     <input name="order_messages" type="integer" label="排序 · 消息" default="10" help="数字越小越靠前；相同时按消息、动态、视频、账户排列。" />
     <input name="order_dynamic" type="integer" label="排序 · 动态" default="20" />
     <input name="order_videos" type="integer" label="排序 · 视频" default="30" />
@@ -208,6 +210,8 @@ const PRIVATE_RATES = {
   "30m": { ms: 1800000, label: "30 分钟" }, "1h": { ms: 3600000, label: "1 小时" },
   "6h": { ms: 21600000, label: "6 小时" },
 };
+let globalRefreshMinutes = null;
+const globalRefreshLabel = () => globalRefreshMinutes % 60 === 0 ? globalRefreshMinutes / 60 + " 小时" : globalRefreshMinutes + " 分钟";
 let privateRate = "10m", privateLive = false, privateTimer = null, privateInflight = null;
 let privateController = null, privateAttemptAt = 0;
 const MOTION = { tabs: 250, page: 250, distance: 8, blur: 3, press: 150, spin: 500, spinReset: 900, bar: 400 };
@@ -430,6 +434,12 @@ async function pollLogin(version) {
 
 function sync(env) {
   lastEnv = env;
+  const minutes = env.inputs.global_refresh_minutes;
+  const nextGlobalMinutes = Number.isSafeInteger(minutes) && minutes >= 1 && minutes <= 1440 ? minutes : 60;
+  if (nextGlobalMinutes !== globalRefreshMinutes) {
+    if (uiLive) $metrix.schedule(nextGlobalMinutes * 60000);
+    globalRefreshMinutes = nextGlobalMinutes;
+  }
   privateCardSize = env.inputs.private_card_size === "compact" ? "compact" : "normal";
   let next = "";
   try { next = String($metrix.secret("sessdata") || "").trim(); } catch {}
@@ -1247,8 +1257,8 @@ function panel(env) {
     h("Box", { height: 1, width: "100%", linearGradient: { stops: [
       { at: 0, color: "surface" }, { at: 0.2, color: "border" }, { at: 0.8, color: "border" }, { at: 1, color: "surface" }] } }),
     connected ? h("Row", { key: "refresh-cadence", width: "100%", height: 24, gap: 8, alignItems: "center", shrink: 0,
-      label: "自动刷新：整体每 1 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
-      tooltip: ["自动刷新：整体每 1 小时" + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
+      label: "自动刷新：整体每 " + globalRefreshLabel() + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
+      tooltip: ["自动刷新：整体每 " + globalRefreshLabel() + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
         "账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,
         features.videos ? "视频 " + stamp(times.videos) : null,
         features.dynamic ? "动态 " + stamp(times.dynamic) : null,
@@ -1258,7 +1268,7 @@ function panel(env) {
       RefreshButton(now),
       h("Row", { gap: 4, alignItems: "center" },
         note("整体", { fontSize: 11, singleLine: true }),
-        text("1 小时", { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })),
+        text(globalRefreshLabel(), { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })),
       privateEnabled() ? h("Row", { key: "private-cadence", gap: 4, alignItems: "center" },
         note("私信", { fontSize: 11, singleLine: true }),
         text(PRIVATE_RATES[privateRate].label, { fontSize: 11, fontWeight: 500, fontFeatures: "tnum", singleLine: true })) : null)
@@ -1285,6 +1295,7 @@ export default {
       await $metrix.panel.open();
     }
     if (name === "lifecycle" && payload?.type === "start") {
+      if (!uiLive) $metrix.schedule((globalRefreshMinutes ?? 60) * 60000);
       startMotion();
       if (!privateLive) privateAttemptAt = Date.now();
       privateLive = true;
