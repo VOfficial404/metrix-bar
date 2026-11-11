@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.17.1" category="social" icon="tv"
+     version="1.18.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -1037,6 +1037,12 @@ function sectionError(key) {
     text(errors[key], { key: "error-" + key, fontSize: 12, textColor: "warning", wrap: true }),
     note(times[key] ? "上次成功：" + stamp(times[key]) : "此项尚无可用数据")) : null;
 }
+const ACCOUNT_SURFACE = {
+  background: "surfaceHover",
+  linearGradient: { angle: 90, stops: [{ at: 0, color: "surfaceHover" }, { at: 1, color: "surface" }] },
+  border: [0.5, "border"],
+  shadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#00000010" },
+};
 function FollowerTrend(now) {
   const metric = FOLLOWER_METRICS.find(item => item.value === followerChart.metric);
   const end = Date.parse(yesterdayDate(now) + "T00:00:00Z"), start = end - (followerChart.days - 1) * 86400000;
@@ -1054,7 +1060,7 @@ function FollowerTrend(now) {
     min = Math.min(min, value);
     max = Math.max(max, value);
   }
-  return h("Column", { key: "follower-trend", label: "粉丝趋势", gap: 4, padding: 8, radius: 12, background: "surfaceHover", width: "100%", minWidth: 0 },
+  return h("Column", { key: "follower-trend", label: "粉丝趋势", gap: 4, padding: 8, radius: 12, ...ACCOUNT_SURFACE, width: "100%", minWidth: 0 },
     h("Row", { width: "100%", alignItems: "center", gap: 8 },
       h("Select", { key: "follower-metric", label: "粉丝趋势指标", value: metric.value, width: 104, minWidth: 0, maxWidth: 104, shrink: 0,
         items: FOLLOWER_METRICS.map(({ value, label }) => ({ value, label })),
@@ -1066,7 +1072,8 @@ function FollowerTrend(now) {
     available ? h("Chart", { key: "follower-chart", type: "line", xKind: "category", labels, series,
       curve: "monotone", height: followerChartHeight, width: "100%", xTicks: 3, yTicks: 3, xDomain: [0, followerChart.days - 1],
       yDomain: min === max ? [-1, 1] : [min < 0 ? min - (max - min) * 0.1 : 0, max > 0 ? max + (max - min) * 0.1 : 0],
-      dots: true, legend: false, hover: true, appear: false,
+      dots: true, legend: false, hover: true, appear: false, strokeWidth: 2,
+      background: "surface", radius: 6, insetShadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#00000012" },
       referenceLines: [{ value: 0, color: "border" }],
       label: "近 " + followerChart.days + " 天每日" + metric.label + "，单位：人" })
       : note(followerTrend === null && loading ? "正在读取粉丝趋势…" : "所选时段暂无可用趋势数据", { key: "follower-trend-empty", paddingY: 24, wrap: true }),
@@ -1081,7 +1088,7 @@ function Account(now) {
   const entered = motionAllowed() && barStarted !== null ? smoothOut(clamp((now - barStarted) / MOTION.bar)) : 1;
   const { identity, followers: totals, daily: dailySize, level } = accountSizes;
   return h("Column", { gap: 8, width: "100%" },
-    features.identity ? h("Row", { key: "identity-details", height: identity.identityHeight, paddingX: identity.padding, radius: 10, background: "surfaceHover",
+    features.identity ? h("Row", { key: "identity-details", height: identity.identityHeight, paddingX: identity.padding, radius: 10, ...ACCOUNT_SURFACE,
       width: "100%", minWidth: 0, gap: 10, alignItems: "center" },
       note("UID " + account.uid, { key: "uid", fontSize: 11, grow: 1, minWidth: 0, shrink: 1,
         singleLine: true, fontFeatures: "tnum", tooltip: "UID " + account.uid }),
@@ -1094,11 +1101,11 @@ function Account(now) {
     features.followers ? h("Grid", { key: "follower-totals", columns: 2, gap: 8, width: "100%" },
       ...[["粉丝总数", followers?.count, "followers"], ["关注数量", followers?.following, "following"]].map(([label, value, key]) =>
         h(totals.compact ? "Row" : "Column", { key: "tile-" + key, padding: totals.padding, gap: totals.gap, radius: 12,
-          background: "surfaceHover", width: "100%", minWidth: 0, tooltip: label + " " + comma(value) },
+          ...ACCOUNT_SURFACE, width: "100%", minWidth: 0, tooltip: label + " " + comma(value) },
           note(label, { fontSize: totals.compact ? 11 : 12, ...(totals.compact ? { grow: 1 } : {}), minWidth: 0 }),
-          text(comma(value), { key, fontSize: totals.value, fontFeatures: "tnum", minWidth: 0, wrap: true })))) : null,
+          text(comma(value), { key, fontSize: totals.value, fontWeight: 600, fontFeatures: "tnum", minWidth: 0, wrap: true })))) : null,
     features.followers ? sectionError("followerDaily") : null,
-    features.followers ? h("Column", { key: "follower-daily", gap: dailySize.gap, padding: dailySize.padding, radius: 12, background: "surfaceHover", width: "100%" },
+    features.followers ? h("Column", { key: "follower-daily", gap: dailySize.gap, padding: dailySize.padding, radius: 12, ...ACCOUNT_SURFACE, width: "100%" },
       h(dailySize.compact ? "Grid" : "Column", { columns: 3, gap: dailySize.gap, width: "100%", minWidth: 0 },
         [["昨日新增关注", "follower-follow", daily?.follow, "text"],
           ["昨日取关", "follower-unfollow", daily?.unfollow, daily?.unfollow > 0 ? "danger" : "text"],
@@ -1107,23 +1114,26 @@ function Account(now) {
             width: "100%", minWidth: 0, gap: dailySize.gap, tooltip: label + " " + (value == null ? "—" : comma(value)) },
             note(dailySize.compact ? label.slice(2) : label, { ...(dailySize.compact ? { fontSize: 11 } : { grow: 1 }), minWidth: 0 }),
             text(value == null ? "—" : key === "follower-net" ? signed(value) : comma(value),
-              { key, fontSize: dailySize.value, fontFeatures: "tnum", textColor: color, wrap: true })))),
+              { key, fontSize: dailySize.value, fontWeight: 500, fontFeatures: "tnum", textColor: color, wrap: true })))),
       note(daily ? (dailySize.compact ? "昨日 · " : "") + daily.date + " · B 站统计"
         : "昨日统计暂不可用" + (followerDaily ? " · 最近统计 " + followerDaily.date : ""),
         { key: "follower-date", fontSize: 11, wrap: true,
           tooltip: "按北京时间自然日统计；昨日净增 = B 站昨日新增关注 − 昨日取关。服务端更新可能延迟。" })) : null,
     features.followers ? sectionError("followerTrend") : null,
     features.followers ? FollowerTrend(now) : null,
-    features.level ? h("Column", { key: "level-details", gap: level.gap, padding: level.padding, radius: 12, background: "surfaceHover", width: "100%" },
+    features.level ? h("Column", { key: "level-details", gap: level.gap, padding: level.padding, radius: 12, ...ACCOUNT_SURFACE, width: "100%" },
       h("Row", { alignItems: "center", gap: 8, width: "100%" },
         text("Lv." + account.level, { key: "level", fontSize: 12, fontWeight: 600, height: 20,
-          paddingX: 6, radius: 4, background: levelColor, textColor: "#FFFFFF", shrink: 0 }),
+          paddingX: 6, radius: 4, background: levelColor, textColor: "#FFFFFF", shrink: 0,
+          insetShadow: { x: 0, y: 1, blur: 0, spread: 0, color: "#FFFFFF30" } }),
         account.senior ? text("硬核会员", { key: "senior-member", fontSize: 11, fontWeight: 500,
-          paddingX: 6, height: 18, radius: 9, background: LEVEL_COLORS[6], textColor: "#FFFFFF", shrink: 0 }) : null,
+          paddingX: 6, height: 18, radius: 5, background: LEVEL_COLORS[6] + "12", textColor: "text",
+          border: [0.5, LEVEL_COLORS[6] + "55"], shrink: 0 }) : null,
         h("Spacer"),
         note(account.next == null ? "已达最高等级" : "距下一级还需 " + comma(Math.max(0, account.next - account.xp)) + " EXP", { minWidth: 0, singleLine: true })),
       h("Box", { width: "100%", height: 4, radius: 2, background: "border", clip: true, label: "等级经验进度" },
-        h("Box", { key: "level-progress", width: `${progress * entered * 100}%`, height: 4, radius: 2, background: levelColor })),
+        h("Box", { key: "level-progress", width: `${progress * entered * 100}%`, height: 4, radius: 2, background: levelColor,
+          linearGradient: { stops: [{ at: 0, color: levelColor + "80" }, { at: 1, color: levelColor }] } })),
       note("累计经验 " + comma(account.xp) + (account.next == null ? " · 已满级" : " / " + comma(account.next)),
         { key: "experience", fontSize: level.compact ? 11 : level.value - 4, fontFeatures: "tnum", wrap: true })) : null,
     !features.identity && !features.followers && !features.level
