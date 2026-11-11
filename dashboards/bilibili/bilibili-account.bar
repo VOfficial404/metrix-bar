@@ -1,5 +1,5 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.20.0" category="social" icon="tv"
+     version="1.19.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="glass">
@@ -1027,20 +1027,18 @@ function tile(label, value, key, options = {}) {
   const content = h("Column", { gap: 0, width: "100%", minWidth: 0 },
     note(label), text(value, { key, fontSize: 16, lineHeight: 1.375, textColor: options.color || "text", fontFeatures: "tnum", wrap: true }));
   return h(options.onClick ? "ButtonBase" : "Column", { key: "tile-" + key,
-    padding: 12, radius: 12, ...GLASS_SURFACE, width: "100%", minWidth: 0,
+    padding: 12, radius: 12, background: "surfaceHover", width: "100%", minWidth: 0,
     ...(options.onClick ? { ...pressStyle(), onClick: options.onClick, label: label + " " + value,
-      hover: GLASS_HOVER, focusRing: true } : {}),
+      hover: { background: "surfacePressed" }, focusRing: true } : {}),
     ...(options.tooltip ? { tooltip: options.tooltip } : {}) }, content);
 }
 function sectionError(key) {
-  return errors[key] ? h("Column", { padding: 10, gap: 4, radius: 12, ...GLASS_SURFACE, border: [1, "warning"], width: "100%" },
+  return errors[key] ? h("Column", { padding: 10, gap: 4, radius: 12, border: [1, "warning"], width: "100%" },
     text(errors[key], { key: "error-" + key, fontSize: 12, textColor: "warning", wrap: true }),
     note(times[key] ? "上次成功：" + stamp(times[key]) : "此项尚无可用数据")) : null;
 }
-const GLASS_MATERIAL = { type: "glass", style: "regular", tint: "surface", interactive: false };
-const GLASS_HOVER = { material: { ...GLASS_MATERIAL, tint: "surfacePressed" } };
-const GLASS_SURFACE = {
-  material: GLASS_MATERIAL,
+const ACCOUNT_SURFACE = {
+  material: { type: "glass", style: "regular", tint: "surface", interactive: false },
   border: [0.5, "border"],
   shadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#00000010" },
 };
@@ -1061,7 +1059,7 @@ function FollowerTrend(now) {
     min = Math.min(min, value);
     max = Math.max(max, value);
   }
-  return h("Column", { key: "follower-trend", label: "粉丝趋势", gap: 4, padding: 8, radius: 12, ...GLASS_SURFACE, width: "100%", minWidth: 0 },
+  return h("Column", { key: "follower-trend", label: "粉丝趋势", gap: 4, padding: 8, radius: 12, ...ACCOUNT_SURFACE, width: "100%", minWidth: 0 },
     h("Row", { width: "100%", alignItems: "center", gap: 8 },
       h("Select", { key: "follower-metric", label: "粉丝趋势指标", value: metric.value, width: 104, minWidth: 0, maxWidth: 104, shrink: 0,
         items: FOLLOWER_METRICS.map(({ value, label }) => ({ value, label })),
@@ -1074,7 +1072,7 @@ function FollowerTrend(now) {
       curve: "monotone", height: followerChartHeight, width: "100%", xTicks: 3, yTicks: 3, xDomain: [0, followerChart.days - 1],
       yDomain: min === max ? [-1, 1] : [min < 0 ? min - (max - min) * 0.1 : 0, max > 0 ? max + (max - min) * 0.1 : 0],
       dots: true, legend: false, hover: true, appear: false, strokeWidth: 2,
-      material: GLASS_MATERIAL, radius: 6,
+      background: "surface", radius: 6, insetShadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#00000012" },
       referenceLines: [{ value: 0, color: "border" }],
       label: "近 " + followerChart.days + " 天每日" + metric.label + "，单位：人" })
       : note(followerTrend === null && loading ? "正在读取粉丝趋势…" : "所选时段暂无可用趋势数据", { key: "follower-trend-empty", paddingY: 24, wrap: true }),
@@ -1089,7 +1087,7 @@ function Account(now) {
   const entered = motionAllowed() && barStarted !== null ? smoothOut(clamp((now - barStarted) / MOTION.bar)) : 1;
   const { identity, followers: totals, daily: dailySize, level } = accountSizes;
   return h("Column", { gap: 8, width: "100%" },
-    features.identity ? h("Row", { key: "identity-details", height: identity.identityHeight, paddingX: identity.padding, radius: 10, ...GLASS_SURFACE,
+    features.identity ? h("Row", { key: "identity-details", height: identity.identityHeight, paddingX: identity.padding, radius: 10, ...ACCOUNT_SURFACE,
       width: "100%", minWidth: 0, gap: 10, alignItems: "center" },
       note("UID " + account.uid, { key: "uid", fontSize: 11, grow: 1, minWidth: 0, shrink: 1,
         singleLine: true, fontFeatures: "tnum", tooltip: "UID " + account.uid }),
@@ -1102,11 +1100,11 @@ function Account(now) {
     features.followers ? h("Grid", { key: "follower-totals", columns: 2, gap: 8, width: "100%" },
       ...[["粉丝总数", followers?.count, "followers"], ["关注数量", followers?.following, "following"]].map(([label, value, key]) =>
         h(totals.compact ? "Row" : "Column", { key: "tile-" + key, padding: totals.padding, gap: totals.gap, radius: 12,
-          ...GLASS_SURFACE, width: "100%", minWidth: 0, tooltip: label + " " + comma(value) },
+          ...ACCOUNT_SURFACE, width: "100%", minWidth: 0, tooltip: label + " " + comma(value) },
           note(label, { fontSize: totals.compact ? 11 : 12, ...(totals.compact ? { grow: 1 } : {}), minWidth: 0 }),
           text(comma(value), { key, fontSize: totals.value, fontWeight: 600, fontFeatures: "tnum", minWidth: 0, wrap: true })))) : null,
     features.followers ? sectionError("followerDaily") : null,
-    features.followers ? h("Column", { key: "follower-daily", gap: dailySize.gap, padding: dailySize.padding, radius: 12, ...GLASS_SURFACE, width: "100%" },
+    features.followers ? h("Column", { key: "follower-daily", gap: dailySize.gap, padding: dailySize.padding, radius: 12, ...ACCOUNT_SURFACE, width: "100%" },
       h(dailySize.compact ? "Grid" : "Column", { columns: 3, gap: dailySize.gap, width: "100%", minWidth: 0 },
         [["昨日新增关注", "follower-follow", daily?.follow, "text"],
           ["昨日取关", "follower-unfollow", daily?.unfollow, daily?.unfollow > 0 ? "danger" : "text"],
@@ -1122,7 +1120,7 @@ function Account(now) {
           tooltip: "按北京时间自然日统计；昨日净增 = B 站昨日新增关注 − 昨日取关。服务端更新可能延迟。" })) : null,
     features.followers ? sectionError("followerTrend") : null,
     features.followers ? FollowerTrend(now) : null,
-    features.level ? h("Column", { key: "level-details", gap: level.gap, padding: level.padding, radius: 12, ...GLASS_SURFACE, width: "100%" },
+    features.level ? h("Column", { key: "level-details", gap: level.gap, padding: level.padding, radius: 12, ...ACCOUNT_SURFACE, width: "100%" },
       h("Row", { alignItems: "center", gap: 8, width: "100%" },
         text("Lv." + account.level, { key: "level", fontSize: 12, fontWeight: 600, height: 20,
           paddingX: 6, radius: 4, background: levelColor, textColor: "#FFFFFF", shrink: 0,
@@ -1142,8 +1140,8 @@ function Account(now) {
 }
 function Videos() {
   let items;
-  if (videos === null) items = note(loading ? "正在读取视频…" : "视频数据尚不可用", { ...GLASS_SURFACE, padding: 12, radius: 12, wrap: true });
-  else if (videos.length === 0) items = note("还没有公开发布的视频", { key: "no-videos", ...GLASS_SURFACE, radius: 12, paddingY: 24, textAlign: "center" });
+  if (videos === null) items = note(loading ? "正在读取视频…" : "视频数据尚不可用");
+  else if (videos.length === 0) items = note("还没有公开发布的视频", { key: "no-videos", paddingY: 24, textAlign: "center" });
   else items = videos.slice(0, videoLimit).map(video => {
     const stats = VIDEO_STATS.filter(({ option }) => features[option]);
     const cells = stats.map(({ label, field }) => {
@@ -1161,9 +1159,9 @@ function Videos() {
       h("Column", { gap: 4, grow: 1, minWidth: 0 },
         text(video.title, { fontSize: 13, fontWeight: 500, maxLines: 2, wrap: true, minWidth: 0 }),
         features.video_date ? note(stamp(video.published), { key: video.id + "-date", singleLine: true, minWidth: 0, tooltip: video.id }) : null));
-    return h("ButtonBase", { key: video.id, padding: 12, radius: 12, ...GLASS_SURFACE,
+    return h("ButtonBase", { key: video.id, padding: 12, radius: 12, background: "surfaceHover",
       width: "100%", minWidth: 0, ...pressStyle(), onClick: launch("https://www.bilibili.com/video/" + video.id),
-      label: video.title, tooltip: video.title, hover: GLASS_HOVER, focusRing: true },
+      label: video.title, tooltip: video.title, hover: { background: "surfacePressed" }, focusRing: true },
       h("Column", { gap: 8, width: "100%", minWidth: 0 }, heading,
         cells.length ? h("Grid", { key: video.id + "-stats", columns: cells.length, gap: 4, width: "100%" }, cells) : null));
   });
@@ -1205,14 +1203,14 @@ function Dynamics() {
       text(dynamicFilterOpen ? "筛选用户" : summary, { key: "dynamic-filter-summary", fontSize: 12,
         textColor: "textMuted", grow: 1, minWidth: 0, singleLine: true }),
       h("ButtonBase", { key: "dynamic-filter-toggle", height: 28, paddingX: 10, paddingY: 0, radius: 8,
-        ...GLASS_SURFACE, hover: GLASS_HOVER, focusRing: true, shrink: 0,
+        background: "surfaceHover", hover: { background: "surfacePressed" }, focusRing: true, shrink: 0,
         label: dynamicFilterOpen ? "返回动态" : "筛选用户", ...pressStyle(),
         onClick: () => { dynamicFilterOpen = !dynamicFilterOpen; $metrix.invalidate(); } },
         text(dynamicFilterOpen ? "返回动态" : "筛选", { fontSize: 12 }))),
     dynamicFilterOpen
-      ? h("Scroll", { key: "dynamic-filter-scroll", width: "100%", grow: 1, minHeight: 0, radius: 12, ...GLASS_SURFACE },
+      ? h("Scroll", { key: "dynamic-filter-scroll", width: "100%", grow: 1, minHeight: 0 },
         h("Column", { width: "100%", minWidth: 0, paddingX: 12, paddingY: 4 }, DynamicFilters()))
-      : h("Scroll", { key: "scroll-dynamic", width: "100%", grow: 1, minHeight: 0, radius: 12, ...GLASS_SURFACE },
+      : h("Scroll", { key: "scroll-dynamic", width: "100%", grow: 1, minHeight: 0 },
         h("Column", { gap: 0, width: "100%", minWidth: 0, paddingX: 12 },
           sectionError("dynamic"),
           dynamics === null ? note(dynamicInflight || loading ? "正在读取动态…" : "动态尚不可用，请刷新。", { wrap: true, paddingY: 16 })
@@ -1221,7 +1219,7 @@ function Dynamics() {
               { key: "dynamic-empty", wrap: true, paddingY: 16 }) : null,
           items.map((item, index) => h("Column", { key: "dynamic-row-" + item.id, gap: 0, width: "100%", minWidth: 0 },
             h("ButtonBase", { key: "dynamic-item-" + item.id, width: "100%", minWidth: 0, paddingX: 0, paddingY: 12, radius: 8,
-              hover: GLASS_HOVER, focusRing: true, ...pressStyle(),
+              hover: { background: "surfaceHover" }, focusRing: true, ...pressStyle(),
               label: item.name + "的动态，打开原文", onClick: launch("https://t.bilibili.com/" + item.id) },
               h("Column", { gap: 8, width: "100%", minWidth: 0 },
                 h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "center" },
@@ -1234,7 +1232,7 @@ function Dynamics() {
     !dynamicFilterOpen && dynamics ? h("Row", { width: "100%", paddingX: 12, gap: 8, alignItems: "center", shrink: 0 },
       note("已加载 " + dynamics.items.length + " 条 · 显示 " + items.length + " 条", { key: "dynamic-count", fontSize: 11, grow: 1, minWidth: 0 }),
       dynamics.hasMore && dynamics.items.length < 100 ? h("ButtonBase", { key: "dynamic-more", height: 28, paddingX: 10,
-        radius: 8, ...GLASS_SURFACE, hover: GLASS_HOVER, focusRing: true, shrink: 0, ...pressStyle(),
+        radius: 8, background: "surfaceHover", hover: { background: "surfacePressed" }, focusRing: true, shrink: 0, ...pressStyle(),
         label: dynamicInflight ? "加载中…" : "加载更多", disabled: !!dynamicInflight || loading, onClick: () => refreshDynamics(true) },
         text(dynamicInflight ? "加载中…" : "加载更多", { fontSize: 12 })) : null) : null,
     !dynamicFilterOpen && dynamics?.items.length >= 100 ? note("已加载 100 条，刷新可查看最新动态。", { paddingX: 12, wrap: true, shrink: 0 }) : null);
@@ -1242,14 +1240,14 @@ function Dynamics() {
 function ConversationList() {
   const dense = privateCardSize === "compact";
   let items;
-  if (conversations === null) items = note(loading || privateInflight ? "正在读取私信会话…" : "私信会话尚不可用", { key: "conversations-pending", ...GLASS_SURFACE, padding: 12, radius: 12, wrap: true });
-  else if (!conversations.length) items = note("暂无用户私信会话", { key: "no-conversations", ...GLASS_SURFACE, radius: 12, paddingY: 24, textAlign: "center" });
+  if (conversations === null) items = note(loading || privateInflight ? "正在读取私信会话…" : "私信会话尚不可用", { key: "conversations-pending" });
+  else if (!conversations.length) items = note("暂无用户私信会话", { key: "no-conversations", paddingY: 24, textAlign: "center" });
   else items = conversations.map(row => {
     const preview = text(row.preview, { key: "conversation-preview-" + row.uid, fontSize: 12, textColor: "textMuted",
       maxLines: dense ? 1 : 2, wrap: !dense, singleLine: dense, minWidth: 0, tooltip: row.preview, ...(dense ? { grow: 1 } : {}) });
     const time = note(stamp(row.at), { key: "conversation-time-" + row.uid, fontSize: 10, singleLine: true, shrink: 0 });
     return h("ButtonBase", { key: "private-session-" + row.uid, width: "100%", minWidth: 0,
-      paddingX: 8, paddingY: dense ? 8 : 10, radius: 8, ...GLASS_SURFACE, ...pressStyle(), hover: GLASS_HOVER, focusRing: true,
+      paddingX: 8, paddingY: dense ? 8 : 10, radius: 8, ...pressStyle(), hover: { background: "surfaceHover" }, focusRing: true,
       label: row.name + "的私信会话", onClick: launch("https://message.bilibili.com/#/whisper/mid" + row.uid) },
       h("Row", { width: "100%", minWidth: 0, gap: 8, alignItems: "start" },
         h("Avatar", { name: row.name, ...(row.avatar ? { src: row.avatar } : {}), width: dense ? 28 : 36, height: dense ? 28 : 36,
@@ -1276,8 +1274,8 @@ function Messages() {
   const n = notifications, root = "https://message.bilibili.com/#/";
   const list = privateEnabled() && privateDisplay === "list";
   const message = (label, value, key, path, tooltip) => h("ButtonBase", { key: "tile-" + key,
-    width: "100%", minWidth: 0, padding: 10, radius: 8, ...GLASS_SURFACE,
-    hover: GLASS_HOVER, focusRing: true, ...pressStyle(),
+    width: "100%", minWidth: 0, padding: 10, radius: 8, background: "surfaceHover",
+    hover: { background: "surfacePressed" }, focusRing: true, ...pressStyle(),
     label: label + " " + comma(value), onClick: launch(root + path), ...(tooltip ? { tooltip } : {}) },
     h("Row", { width: "100%", minWidth: 0, gap: 6, alignItems: "center" },
       text(label, { fontSize: 12, grow: 1, minWidth: 0, singleLine: true }),
@@ -1307,7 +1305,7 @@ function Messages() {
 function IdentityHeader() {
   return h("Row", { width: "100%", alignItems: "center", gap: 12, shrink: 0 },
     h("ButtonBase", { key: "login-start", width: 40, height: 40, padding: 0, radius: 20,
-      material: GLASS_MATERIAL, alignItems: "center", justify: "center", onClick: () => startLogin(),
+      background: "accentSubtle", alignItems: "center", justify: "center", onClick: () => startLogin(),
       label: "重新扫码登录", tooltip: "重新扫码登录", ...pressStyle(), focusRing: true },
       h("Avatar", { key: "account-avatar", name: account.name, ...(account.avatar ? { src: account.avatar } : {}),
         width: 40, height: 40, radius: 20, fit: "cover", label: account.name + "的头像" })),
@@ -1318,7 +1316,7 @@ function RefreshButton(now) {
   return h("ButtonBase", { key: "refresh", width: 24, height: 24, padding: 4, radius: 6,
     disabled: loading || !!inputError, onClick: () => requestRefresh(),
     label: loading ? "正在刷新" : "刷新", tooltip: loading ? "正在刷新" : "刷新（Ctrl/Cmd+R）", shrink: 0,
-    textColor: "textMuted", hover: { ...GLASS_HOVER, textColor: "text" }, focusRing: true, ...pressStyle("refresh") },
+    textColor: "textMuted", hover: { background: "surfaceHover", textColor: "text" }, focusRing: true, ...pressStyle("refresh") },
     h("Icon", { key: "refresh-icon", svg: REFRESH_ICON, width: 12, height: 12, fontSize: 12,
       rotate: refreshAngle(now), transformOrigin: [0.5, 0.5] }));
 }
@@ -1328,7 +1326,8 @@ function pageMenu() {
 }
 function Navigation(width, now) {
   const pill = h("Box", { key: "tab-pill", width: (width - 6) / tabs.length, height: 28,
-    radius: 14, ...GLASS_SURFACE, translate: [pillPosition(now) * (width - 6) / tabs.length, 0], ignoreInput: true });
+    radius: 14, background: "surface", translate: [pillPosition(now) * (width - 6) / tabs.length, 0],
+    shadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#0000000a" }, ignoreInput: true });
   const buttons = tabs.map((item, i) => h("Part", { key: "tab-" + item.id, name: "tab", index: i,
     grow: 1, basis: 0, height: 28, padding: 0, radius: 14, alignItems: "center", justify: "center", textColor: tab === item.id ? "text" : "textMuted",
     focusRing: true, ...pressStyle() }, h("Row", { paddingLeft: 9, gap: 4, alignItems: "center", justify: "center" },
@@ -1338,7 +1337,7 @@ function Navigation(width, now) {
   const controls = h("TabsBase", { key: "navigation", value: tabIndex(), onChange: selectTab,
     rowStart: 1, columnStart: 1, width: "100%" },
     h("Part", { name: "list", padding: 3, height: 34, width: "100%" }, buttons));
-  return h("Grid", { columns: 1, width: "100%", radius: 17, material: GLASS_MATERIAL },
+  return h("Grid", { columns: 1, width: "100%", radius: 17, background: "surfaceHover" },
     h("Row", { rowStart: 1, columnStart: 1, height: 34, padding: 3, width: "100%", ignoreInput: true }, pill), controls);
 }
 function Pages(now) {
@@ -1358,7 +1357,7 @@ function LoginPanel(width) {
   const message = login.phase === "idle" ? problem || "使用手机 App 扫码登录" : login.message;
   const action = busy ? login.phase === "saving" ? "正在连接…" : "生成中…" : active || retry ? "重新生成" : "扫码登录";
   const qrSize = Math.min(212, width);
-  return h("Column", { key: "login-panel", gap: 12, width: "100%", minWidth: 0, radius: 12, material: GLASS_MATERIAL, alignItems: "center" },
+  return h("Column", { gap: 12, width: "100%", minWidth: 0, alignItems: "center" },
     login.svg ? h("Image", { key: "login-qr", svg: login.svg, width: qrSize, height: qrSize,
       radius: 12, background: "#ffffff", border: [1, "border"], textColor: "#000000", label: "哔哩哔哩登录二维码",
       ...(motionAllowed() ? { keyframes: { ...LOGIN_REVEAL, run: loginVersion } } : {}) }) : null,
@@ -1368,15 +1367,15 @@ function LoginPanel(width) {
         wrap: true, textAlign: "center", textColor: retry || problem ? "warning" : busy ? "textMuted" : "text" })),
     h("Row", { gap: 8, width: "100%", justify: "center" },
       login.phase !== "idle" ? h("ButtonBase", { key: "login-cancel", height: 32, paddingX: 14, paddingY: 0,
-        radius: 16, ...GLASS_SURFACE, disabled: login.phase === "saving",
+        radius: 16, background: "surface", disabled: login.phase === "saving",
         onClick: () => cancelLogin(), label: account ? "返回账户" : "取消", focusRing: true,
-        hover: GLASS_HOVER, ...pressStyle() },
+        hover: { background: "surfaceHover" }, ...pressStyle() },
         text(account ? "返回账户" : "取消", { fontSize: 13, textColor: "textMuted" })) : null,
       h("ButtonBase", { key: active ? "login-regenerate" : "login-start", height: 32, paddingX: 14, paddingY: 0,
-        ...(active ? {} : { grow: 1, basis: 0 }), radius: 16, ...GLASS_SURFACE, disabled: busy,
+        ...(active ? {} : { grow: 1, basis: 0 }), radius: 16, background: active ? "surface" : "text", disabled: busy,
         onClick: () => startLogin(), label: action, focusRing: true,
-        hover: GLASS_HOVER, ...pressStyle() },
-        text(action, { fontSize: 13, fontWeight: active ? 400 : 500, textColor: "text" }))),
+        hover: active ? { background: "surfaceHover" } : { opacity: 0.88 }, ...pressStyle() },
+        text(action, { fontSize: 13, fontWeight: active ? 400 : 500, textColor: active ? "textMuted" : "surface" }))),
     problem && times.account ? note("上次成功：" + stamp(times.account)) : null);
 }
 function accountPreferredHeight(now) {
@@ -1426,7 +1425,7 @@ function panel(env) {
     padding, gap: accountPage ? 8 : 12, radius: 16, textColor: "text", fontSize: 13,
     contextMenu, shortcuts: { "CmdOrCtrl+R": () => requestRefresh() } },
     connected ? IdentityHeader() : h("Row", { gap: 12, alignItems: "center", width: "100%" },
-      h("Box", { width: 40, height: 40, radius: 20, material: GLASS_MATERIAL, alignItems: "center", justify: "center" },
+      h("Box", { width: 40, height: 40, radius: 20, background: "accentSubtle", alignItems: "center", justify: "center" },
         h("Icon", { svg: MARK, width: 22, height: 22, fontSize: 22, textColor: "accent" })),
       h("Column", { gap: 0, grow: 1, minWidth: 0 },
         text("哔哩哔哩", { fontSize: 16, fontWeight: 500 }), note(account ? "切换账户" : "账户登录"))),
@@ -1434,10 +1433,11 @@ function panel(env) {
     connected ? sectionError("account") : null,
     connected ? Pages(now) : h("Scroll", { grow: 1, minHeight: 0, width: "100%" },
       login.phase !== "idle" || inputError || errors.account ? LoginPanel(width)
-        : h("Column", { gap: 12, padding: 12, radius: 12, ...GLASS_SURFACE, width: "100%", alignItems: "center" },
+        : h("Column", { gap: 12, padding: 12, radius: 12, background: "surfaceHover", width: "100%", alignItems: "center" },
           h("Loading", { size: 24, label: "读取账户" }), note("正在读取账户…"))),
-    h("Box", { height: 1, width: "100%", background: "border" }),
-    connected ? h("Row", { key: "refresh-cadence", width: "100%", height: 24, gap: 8, alignItems: "center", shrink: 0, radius: 6, material: GLASS_MATERIAL,
+    h("Box", { height: 1, width: "100%", linearGradient: { stops: [
+      { at: 0, color: "surface" }, { at: 0.2, color: "border" }, { at: 0.8, color: "border" }, { at: 1, color: "surface" }] } }),
+    connected ? h("Row", { key: "refresh-cadence", width: "100%", height: 24, gap: 8, alignItems: "center", shrink: 0,
       label: "自动刷新：整体每 " + globalRefreshLabel() + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
       tooltip: ["自动刷新：整体每 " + globalRefreshLabel() + (privateEnabled() ? "，私信每 " + PRIVATE_RATES[privateRate].label : ""),
         "账户 " + stamp(times.account), features.followers ? "粉丝 " + stamp(times.followers) : null,

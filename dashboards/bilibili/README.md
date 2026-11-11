@@ -1,6 +1,6 @@
 # BiliBili
 
-[下载当前源码](bilibili-account.bar) · [看板源索引](../../registry/index.json) · **1.20.0（2026-11-11）**
+[下载当前源码](bilibili-account.bar) · [看板源索引](../../registry/index.json) · **1.19.0（2026-11-11）**
 
 在 Metrix.Bar 中查看账户、投稿、消息与动态。整体自动刷新间隔可自定义，默认 **1 小时**；私信独立刷新，默认 **10 分钟**。
 
@@ -30,7 +30,7 @@
 
 界面自动跟随系统明暗主题，并遵循“减少动态效果”设置。UID 与硬币仅在账户页显示，硬核会员标识位于等级旁；长 UID 可悬停查看。视频大数字使用“万／亿”，悬停可查看完整值；点击视频、消息卡片或动态条目打开对应网页。
 
-全局使用同一套 Metrix.Bar 原生 Glass 材质：消息统计与会话、动态列表与作者筛选、视频、账户与图表、导航、底部刷新栏、登录及加载／错误区域统一使用主题玻璃表面。卡片共用细描边和轻阴影，交互悬停也保持玻璃材质；原生输入与选择控件沿用宿主 Glass 样式。根容器不绘制实色背景。二维码保留黑白对比，封面和头像保留图片内容，未读、等级和趋势保留有意义的状态颜色。原有尺寸设置与窗口自动收紧继续有效。
+面板使用 Metrix.Bar 原生 Glass 材质，根容器不绘制实色背景以保留系统材质；账户卡片采用带主题底色的玻璃、细描边和轻阴影，图表绘图区保留清晰底色。硬核会员使用淡红底描边徽章，等级保留 B 站配色。保留紧凑尺寸与窗口自动收紧。
 
 更新后关闭并重新打开面板，新的宿主材质才会生效。按 [Metrix.Bar 材质契约](https://metrix.bar/docs/components#panel-material)，macOS 弹出面板可使用系统 popover／Vibrancy；Windows 等环境由宿主提供 Glass 或回退效果。组件 Glass 仅采样同窗口内容，不能直接模糊桌面，不等同于承诺 Windows Acrylic／Mica。原生预览验证明暗主题和可读性，不能证明桌面透视效果；macOS 实机未验证。
 
@@ -221,7 +221,7 @@
 
 ## 预览
 
-以下所有页面和配置示例均为 **1.20.0**，使用合成的隔离数据由 Metrix.Bar 原生渲染，统一展示全局 Glass 材质；预览不包含桌面背景。
+以下均使用合成的隔离示例数据，由 Metrix.Bar 原生渲染。账户浅色／深色预览为 1.19.0 的 Glass 材质卡片、内嵌趋势图与等级徽章（关闭 UID／硬币）；预览不包含桌面背景。动态与筛选预览为 1.14.2，紧凑会话预览为 1.14.1：
 
 | 账户（浅色） | 账户（深色） |
 | --- | --- |
@@ -236,19 +236,15 @@
 | ![紧凑会话浅色](previews/conversations-compact-light.png) | ![紧凑会话深色](previews/conversations-compact-dark.png) |
 
 <details>
-<summary><strong>其他页面示例</strong> · 当前版本</summary>
+<summary><strong>其他页面示例</strong> · 历史版本截图</summary>
 
-消息、视频、普通会话及扫码登录均采用与账户、动态相同的材质；下方也展示部分功能关闭后的效果。
+以下保留各页面的内容与配置示例，按钮位置和刷新频率可能与当前版本不同；当前界面以顶部预览和正文说明为准。
 
-| 视频（浅色） | 视频（深色） |
+| 视频（深色） | 消息（浅色） |
 | --- | --- |
-| ![视频浅色](previews/videos-light.png) | ![视频深色](previews/videos-dark.png) |
+| ![视频](previews/videos-dark.png) | ![消息](previews/messages-light.png) |
 
-| 消息（浅色） | 消息（深色） |
-| --- | --- |
-| ![消息浅色](previews/messages-light.png) | ![消息深色](previews/messages-dark.png) |
-
-| 视频仅保留播放／点赞／收藏 | 消息仅保留私信／回复／@ |
+| 视频仅保留播放／评论 | 消息仅保留收到的赞 |
 | --- | --- |
 | ![视频自定义](previews/video-custom.png) | ![消息自定义](previews/messages-custom.png) |
 
