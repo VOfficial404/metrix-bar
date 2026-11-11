@@ -1,0 +1,467 @@
+<bar protocol-version="0" id="tinytraffic" title="tinytraffic"
+     version="1.0.0" category="analytics" icon="chart.bar"
+     description="网站流量观察：多站点、活跃快照、六项指标、趋势、可筛选排行与自定义事件目标。"
+     license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
+     refresh="3h" material="solid">
+  <permissions>
+    <network origin="{{ inputs.base_url }}" />
+  </permissions>
+  <inputs>
+    <input name="base_url" type="string" label="连接 · tinytraffic 服务地址" default="http://127.0.0.1:8080" required="true"
+           help="填写完整服务源地址，例如 https://stats.example.com；支持 HTTPS 或本机 HTTP，不包含 /api 路径。" />
+    <input name="api_key" type="secret" label="连接 · 只读 API Key"
+           help="在 tinytraffic 的 Account → API keys 创建 Read only 密钥。密钥保存在系统密钥库。" />
+    <input name="refresh_minutes" type="integer" label="刷新 · 间隔（分钟）" default="180"
+           help="填写 1–1440 的整数，默认 180 分钟（3 小时）；清空或超出范围时使用 180 分钟。保存后生效，仍可随时手动刷新。" />
+    <input name="row_limit" type="select" label="展示 · 排行条数" default="5">
+      <option value="5" label="5 条" />
+      <option value="10" label="10 条" />
+      <option value="20" label="20 条" />
+    </input>
+  </inputs>
+  <docs><![CDATA[在本看板设置中填写 tinytraffic 服务地址和只读 API Key。密钥在 tinytraffic 的 Account → API keys 创建。选择站点和时间范围，点击指标切换趋势，点击排行或目标事件添加筛选；无事件记录时隐藏目标板块。活跃数表示上次更新时整个站点最近 5 分钟的访客。默认每 3 小时刷新，可在“刷新 · 间隔（分钟）”中自定义 1–1440 分钟，也可点击刷新或按 Ctrl/Cmd+R。]]></docs>
+  <script apis="localStorage shell match-media"><![CDATA[
+// Native tinytraffic client. API contract: egoist/tinytraffic/docs/api.md (AGPL-3.0).
+const h = (type, props = {}, ...children) => ({ type, props, children: children.flat().filter(x => x != null && x !== false) });
+const txt = (value, props = {}) => h("Text", { text: String(value), ...props });
+const muted = (value, props = {}) => txt(value, { fontSize: 11, textColor: "text", opacity: 0.78, ...props });
+const INK = "#0D9488";
+const MARK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 18V13M9 18V6M14 18V10M19 18V3"/></svg>';
+const PERIODS = [["today", "今天"], ["yesterday", "昨天"], ["24h", "过去 24 小时"], ["7d", "近 7 天"], ["30d", "近 30 天"], ["90d", "近 90 天"], ["month", "本月"], ["lastmonth", "上月"], ["12mo", "近 12 个月"], ["all", "全部时间"], ["custom", "自定义日期"]];
+const METRICS = [["visitors", "访客"], ["visits", "访问次数"], ["pageviews", "浏览量"], ["views_per_visit", "每次访问页数"], ["bounce_rate", "跳出率"], ["visit_duration", "平均停留"]];
+const DIMS = [["page", "访问路径"], ["entry_page", "入口路径"], ["exit_page", "退出路径"], ["hostname", "访问域名"], ["source", "流量来源"], ["referrer", "来源网站"], ["referrer_url", "来源网址"], ["country", "国家 / 地区"], ["region", "省份 / 地区"], ["city", "城市"], ["browser", "浏览器"], ["os", "操作系统"], ["device", "设备类型"], ["event", "自定义事件"], ["utm_source", "UTM 来源"], ["utm_medium", "UTM 媒介"], ["utm_campaign", "UTM 活动"], ["utm_content", "UTM 内容"], ["utm_term", "UTM 关键词"]];
+const has = (items, key) => items.some(item => item[0] === key);
+const items = list => list.map(([value, label]) => ({ value, label }));
+const num = n => typeof n === "number" && Number.isFinite(n) && n >= 0;
+const integer = n => Number.isSafeInteger(n) && n >= 0;
+const full = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+function format(key, n) {
+  if (n == null) return "—";
+  if (key === "bounce_rate") return n.toFixed(1) + "%";
+  if (key === "views_per_visit") return n.toFixed(2);
+  if (key === "visit_duration") {
+    const seconds = Math.round(n);
+    return seconds < 60 ? seconds + "秒" : seconds < 3600 ? Math.floor(seconds / 60) + "分" + seconds % 60 + "秒" : Math.floor(seconds / 3600) + "时" + Math.floor(seconds % 3600 / 60) + "分";
+  }
+  return n >= 1e8 ? (n / 1e8).toFixed(1) + "亿" : n >= 1e4 ? (n / 1e4).toFixed(1) + "万" : full(n);
+}
+function change(current, previous) {
+  if (previous == null) return "无对比";
+  if (previous === 0) return current === 0 ? "0%" : "前期为 0";
+  const delta = (current - previous) / previous * 100;
+  return (delta > 0 ? "+" : "") + delta.toFixed(1) + "%";
+}
+function validDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const ms = Date.parse(value + "T00:00:00Z");
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === value;
+}
+function endpoint(value) {
+  const u = new URL(String(value).trim());
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) throw new Error("服务地址须使用 HTTPS；本机服务可使用 HTTP。");
+  if (u.href.includes("@") || u.search || u.hash || u.pathname !== "/") throw new Error("请填写服务源地址，不包含账号、路径、查询或片段。");
+  return u.origin;
+}
+function metrics(raw) {
+  if (!raw || METRICS.some(([key]) => !num(raw[key])) || ["visitors", "visits", "pageviews"].some(key => !integer(raw[key])) || raw.bounce_rate > 100) throw new Error("指标响应格式无效。");
+  return Object.fromEntries(METRICS.map(([key]) => [key, raw[key]]));
+}
+function queryMeta(raw, requested) {
+  if (!raw || raw.period !== requested.period || !validDate(raw.from) || !validDate(raw.to) || raw.from > raw.to || typeof raw.timezone !== "string" || !raw.timezone || !["hour", "day", "month"].includes(raw.interval) || !Array.isArray(raw.filters)) throw new Error("统计范围响应无效。");
+  const fs = raw.filters.map(f => {
+    if (!f || !has(DIMS, f.dim) || typeof f.value !== "string") throw new Error("筛选响应无效。");
+    return f.dim + ":" + f.value;
+  }).sort();
+  const expectedFrom = raw.interval === "month" ? requested.from.slice(0, 7) + "-01" : requested.from;
+  if (JSON.stringify(fs) !== JSON.stringify(requested.filters.map(f => f.dim + ":" + f.value).sort()) || (requested.period === "custom" && (raw.from !== expectedFrom || raw.to !== requested.to))) throw new Error("返回的统计范围与所选条件不一致。");
+  return { period: raw.period, from: raw.from, to: raw.to, interval: raw.interval, timezone: raw.timezone, filters: raw.filters };
+}
+function series(raw) {
+  if (!Array.isArray(raw) || raw.length > 20000) throw new Error("趋势响应格式无效。");
+  let last = "";
+  return raw.map(row => {
+    if (!row || typeof row.date !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(row.date) || !validDate(row.date.slice(0, 10)) || row.date.slice(11, 13) > "23" || row.date.slice(14, 16) > "59" || row.date.slice(17, 19) > "59" || row.date < last) throw new Error("趋势时间桶无效。");
+    last = row.date;
+    return { date: row.date, ...metrics(row) };
+  });
+}
+function breakdown(raw) {
+  if (!raw || !integer(raw.total_visitors) || !Array.isArray(raw.rows) || raw.rows.length > 1000) throw new Error("排行响应格式无效。");
+  return { total: raw.total_visitors, rows: raw.rows.map(row => {
+    if (!row || typeof row.value !== "string" || !integer(row.visitors) || !integer(row.count)) throw new Error("排行数据无效。");
+    return { value: row.value, visitors: row.visitors, count: row.count };
+  }) };
+}
+let config = null, setupError = "", sites = null, selected = "", period = "7d", metric = "visitors", dimension = "source";
+let from = "", to = "", draftFrom = "", draftTo = "", filters = [], stats = null, ranking = null, realtime = null;
+let goals = null, goalsAt = 0;
+let errors = {}, loadedAt = 0, liveAt = 0, rankAt = 0, generation = 0, controller = null, inflight = null, busy = false;
+let refreshMinutes = 180, workerLive = false;
+let choosingDimension = false;
+let displayedDimension = false, pickerMotion = null, motionTimer = null, reducedMotion = null;
+const regionMotions = new Map();
+const motionAllowed = () => workerLive && reducedMotion?.matches === false;
+function motionValue(motion, now = performance.now()) {
+  if (!motion) return 1;
+  const t = Math.min(1, Math.max(0, (now - motion.started) / motion.duration));
+  const eased = motion === pickerMotion ? t * t * (3 - 2 * t) : 1 - (1 - t) ** 3;
+  return motion.from + (motion.to - motion.from) * eased;
+}
+const pickerOpacity = () => motionValue(pickerMotion);
+const regionOpacity = key => motionValue(regionMotions.get(key));
+function wakeMotion() {
+  if (motionAllowed() && motionTimer === null && (pickerMotion || regionMotions.size)) motionTimer = setTimeout(tickMotion, 16);
+}
+function revealRegion(key, from = 0.65) {
+  if (!motionAllowed()) return;
+  regionMotions.set(key, { from: regionMotions.has(key) ? regionOpacity(key) : from, to: 1, started: performance.now(), duration: 160 });
+  wakeMotion();
+}
+function settleMotion() {
+  clearTimeout(motionTimer); motionTimer = null; pickerMotion = null; regionMotions.clear();
+  displayedDimension = choosingDimension;
+}
+function motionPreferenceChanged() { settleMotion(); $metrix.invalidate(); }
+function tickMotion() {
+  motionTimer = null;
+  if (!motionAllowed()) { settleMotion(); $metrix.invalidate(); return; }
+  const now = performance.now();
+  if (pickerMotion && now - pickerMotion.started >= pickerMotion.duration) {
+    if (displayedDimension !== choosingDimension) {
+      displayedDimension = choosingDimension;
+      pickerMotion = { from: 0, to: 1, started: now, duration: 180 };
+    } else pickerMotion = null;
+  }
+  for (const [key, motion] of regionMotions) if (now - motion.started >= motion.duration) regionMotions.delete(key);
+  $metrix.invalidate();
+  wakeMotion();
+}
+function showDimensionPicker(open) {
+  if (choosingDimension === open) return;
+  const opacity = pickerOpacity();
+  choosingDimension = open;
+  if (motionAllowed()) {
+    const leaving = displayedDimension !== open;
+    pickerMotion = { from: opacity, to: leaving ? 0 : 1, started: performance.now(), duration: leaving ? 100 : 180 };
+    wakeMotion();
+  } else settleMotion();
+  $metrix.invalidate();
+}
+function selectMetric(value) {
+  if (!has(METRICS, value) || metric === value) return;
+  metric = value; persist(); revealRegion("metric"); revealRegion("trend"); $metrix.invalidate();
+}
+const currentSite = () => (sites || []).find(s => s.id === selected);
+const preferencesKey = () => "tinytraffic:view:v1:" + config.base;
+function persist() {
+  try { localStorage.setItem(preferencesKey(), JSON.stringify({ selected, period, metric, dimension, from, to })); delete errors.preferences; }
+  catch { errors.preferences = "展示偏好未保存，下次启动可能恢复默认值。"; }
+}
+function cancel() {
+  generation++;
+  controller?.abort();
+  controller = null; inflight = null; busy = false;
+}
+function clearQuery(clearLive = false) {
+  cancel(); stats = null; ranking = null; loadedAt = 0; rankAt = 0; errors = {};
+  goals = null; goalsAt = 0;
+  if (clearLive) { realtime = null; liveAt = 0; }
+}
+function sync(env) {
+  const minutes = env.inputs.refresh_minutes;
+  const nextMinutes = Number.isSafeInteger(minutes) && minutes >= 1 && minutes <= 1440 ? minutes : 180;
+  if (nextMinutes !== refreshMinutes) {
+    if (workerLive) $metrix.schedule(nextMinutes * 60000);
+    refreshMinutes = nextMinutes;
+  }
+  const raw = String(env.inputs.base_url || "").trim();
+  let key = "";
+  try { key = String($metrix.secret("api_key") || "").trim(); } catch {}
+  const limit = [5, 10, 20].includes(Number(env.inputs.row_limit)) ? Number(env.inputs.row_limit) : 5;
+  if (config?.raw === raw && config.key === key && config.limit === limit) return;
+  const previous = config;
+  choosingDimension = false;
+  settleMotion();
+  clearQuery(true); sites = null; filters = []; setupError = "";
+  config = { raw, key, limit, base: "" };
+  try { config.base = endpoint(raw); } catch (e) { setupError = e instanceof Error ? e.message : "请填写有效服务地址。"; }
+  if (!config.base || previous?.base !== config.base || previous?.key !== key) {
+    selected = ""; period = "7d"; metric = "visitors"; dimension = "source"; from = to = draftFrom = draftTo = "";
+    if (config.base) try {
+      const p = JSON.parse(localStorage.getItem(preferencesKey()) || "{}");
+      if (typeof p.selected === "string" && /^\d+$/.test(p.selected)) selected = p.selected;
+      if (has(PERIODS, p.period) && p.period !== "custom") period = p.period;
+      if (has(METRICS, p.metric)) metric = p.metric;
+      if (has(DIMS, p.dimension)) dimension = p.dimension;
+      if (validDate(p.from) && validDate(p.to) && p.from <= p.to) { from = draftFrom = p.from; to = draftTo = p.to; if (p.period === "custom") period = "custom"; }
+    } catch {}
+  }
+}
+function queryString(q) {
+  const params = new URLSearchParams({ period: q.period });
+  if (q.period === "custom") { params.set("from", q.from); params.set("to", q.to); }
+  for (const f of q.filters) params.append("f", f.dim + ":" + f.value);
+  return params.toString();
+}
+async function api(path, connection, signal) {
+  let res;
+  try { res = await fetch(connection.base + "/api/v1" + path, { signal, redirect: "error", headers: { Accept: "application/json", Authorization: "Bearer " + connection.key } }); }
+  catch { throw new Error(signal.aborted ? "请求已取消或超时。" : "无法连接 tinytraffic，请检查服务地址与网络。"); }
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new Error(({ 401: "API Key 无效或已撤销，请在设置中更换。", 403: "API Key 没有读取权限。", 404: "站点或 API 不存在，请检查 tinytraffic 版本。", 429: "请求频率受限，请稍后刷新。" })[res.status] || "服务返回 HTTP " + res.status + "。");
+  }
+  try { return await res.json(); } catch { throw new Error("服务未返回有效 JSON。"); }
+}
+function load(reloadSites = true) {
+  if (!config?.base || !config.key || setupError) return Promise.resolve();
+  if (inflight) return inflight;
+  if (period === "custom" && (!validDate(from) || !validDate(to) || from > to)) return Promise.resolve();
+  const c = controller = new AbortController(), g = ++generation, connection = config;
+  const q = { period, from, to, filters: filters.map(f => ({ ...f })) }, dim = dimension;
+  const timeout = setTimeout(() => c.abort(), 12000);
+  busy = true; delete errors.sites; $metrix.invalidate();
+  inflight = (async () => {
+    try {
+      if (reloadSites || sites === null) {
+        const raw = await api("/sites", connection, c.signal);
+        if (!Array.isArray(raw) || raw.some(s => !s || !integer(s.id) || !s.id || typeof s.domain !== "string" || !s.domain || typeof s.timezone !== "string") || new Set(raw.map(s => s.id)).size !== raw.length) throw new Error("站点列表响应无效。");
+        if (g !== generation) return;
+        sites = raw.map(s => ({ id: String(s.id), domain: s.domain, timezone: s.timezone }));
+        if (!currentSite()) { selected = sites[0]?.id || ""; stats = ranking = realtime = goals = null; loadedAt = liveAt = rankAt = goalsAt = 0; filters = []; q.filters = []; persist(); }
+      }
+      if (!selected || g !== generation) return;
+      const path = "/sites/" + encodeURIComponent(selected), qs = queryString(q);
+      const rankRequest = api(path + "/breakdown/" + dim + "?" + qs + "&limit=" + connection.limit, connection, c.signal).then(breakdown);
+      const result = await Promise.allSettled([
+        Promise.all([api(path + "/aggregate?" + qs, connection, c.signal), api(path + "/timeseries?" + qs, connection, c.signal)]).then(([a, t]) => {
+          const meta = queryMeta(a.query, q), tm = queryMeta(t.query, q);
+          if (meta.from !== tm.from || meta.to !== tm.to || meta.interval !== tm.interval || meta.timezone !== tm.timezone) throw new Error("汇总与趋势的统计范围不一致，请刷新。");
+          return { current: metrics(a.current), previous: a.previous === null ? null : metrics(a.previous), query: meta, points: series(t.points) };
+        }),
+        rankRequest,
+        api(path + "/realtime", connection, c.signal).then(raw => { if (!integer(raw?.visitors)) throw new Error("实时访客响应无效。"); return raw.visitors; }),
+        dim === "event" ? rankRequest : api(path + "/breakdown/event?" + qs + "&limit=" + connection.limit, connection, c.signal).then(breakdown),
+      ]);
+      if (g !== generation) return;
+      for (let i = 0; i < result.length; i++) {
+        const key = ["stats", "ranking", "realtime", "goals"][i], r = result[i];
+        if (r.status === "rejected") errors[key] = r.reason.message;
+        else {
+          delete errors[key];
+          if (i === 0) { stats = r.value; loadedAt = Date.now(); revealRegion("stats", 0.8); revealRegion("trend", 0.8); }
+          if (i === 1) { ranking = r.value; rankAt = Date.now(); revealRegion("ranking", 0.8); }
+          if (i === 2) { realtime = r.value; liveAt = Date.now(); }
+          if (i === 3) { goals = r.value; goalsAt = Date.now(); }
+        }
+      }
+    } catch (e) { if (g === generation) errors.sites = e.message; }
+    finally { clearTimeout(timeout); if (g === generation) { controller = null; inflight = null; busy = false; $metrix.invalidate(); } }
+  })();
+  return inflight;
+}
+function selectSite(value) {
+  if (value === selected || !(sites || []).some(s => s.id === value)) return;
+  clearQuery(true); selected = value; filters = []; persist(); revealRegion("content"); return load(false);
+}
+function selectPeriod(value) {
+  if (!has(PERIODS, value) || value === period) return;
+  clearQuery(); period = value; persist(); revealRegion("content"); $metrix.invalidate(); return load(false);
+}
+function applyDates() {
+  if (!validDate(draftFrom) || !validDate(draftTo) || draftFrom > draftTo) { errors.dates = "请填写有效的起止日期，开始日期不能晚于结束日期。"; $metrix.invalidate(); return; }
+  clearQuery(); from = draftFrom; to = draftTo; persist(); revealRegion("content"); return load(false);
+}
+function selectDimension(value) {
+  if (!has(DIMS, value) || value === dimension) return;
+  cancel(); dimension = value; ranking = null; rankAt = 0; delete errors.ranking; persist(); return load(false);
+}
+function chooseDimension(value) {
+  if (!has(DIMS, value)) return;
+  closeDimensionPicker();
+  selectDimension(value);
+}
+function addFilter(value, dim = dimension) {
+  if (filters.some(f => f.dim === dim && f.value === value)) return;
+  if (filters.length >= 10) { errors.filters = "最多同时应用 10 项筛选，请先移除一项。"; $metrix.invalidate(); return; }
+  clearQuery(); filters = [...filters, { dim, value }]; revealRegion("content"); return load(false);
+}
+function removeFilter(index) { clearQuery(); filters = filters.filter((_, i) => i !== index); revealRegion("content"); return load(false); }
+function resetFilters() { clearQuery(); filters = []; revealRegion("content"); return load(false); }
+const openDashboard = () => { if (config?.base) $metrix.openURL(config.base + (selected ? "/sites/" + encodeURIComponent(selected) : "/")); };
+const button = (key, label, action, props = {}) => h("ButtonBase", { key, label, onClick: action, focusRing: true, radius: 6, paddingX: 8, height: 28, hover: { background: "surfaceHover" }, pressed: { background: "surfacePressed" }, ...props }, txt(label, { fontSize: 12, singleLine: true, minWidth: 0, shrink: 1 }));
+function consoleButton(key, props = {}) {
+  return h("ButtonBase", { key, label: "打开控制台", tooltip: "在浏览器中打开" + (currentSite() ? "当前站点控制台：" + currentSite().domain : " tinytraffic 控制台"), onClick: openDashboard, focusRing: true, height: 28, paddingX: 6, radius: 5, shrink: 0, hover: { background: "surfaceHover" }, ...props },
+    h("Row", { gap: 4, alignItems: "center" }, txt("控制台", { fontSize: 12, singleLine: true }),
+      h("Icon", { width: 13, height: 13, svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7M21 3l-11 11M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>' })));
+}
+const stamp = time => time ? new Date(time).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : "尚未更新";
+const emptyLabel = (dim, value) => value || (["source", "referrer", "referrer_url"].includes(dim) ? "直接访问" : "未知 / 未设置");
+function ErrorNotice(key) {
+  return errors[key] ? muted(errors[key], { key: "error-" + key, textColor: "warning", wrap: true, width: "100%" }) : null;
+}
+function Header() {
+  return h("Column", { gap: 8, width: "100%", padding: [8, 12], shrink: 0 },
+    h("Row", { gap: 8, alignItems: "center", width: "100%", minWidth: 0 },
+      h("Icon", { svg: MARK, width: 14, height: 14, textColor: "textMuted", shrink: 0 }),
+      txt("tinytraffic", { key: "widget-title", fontSize: 14, fontWeight: 600, grow: 1, singleLine: true }),
+      config.base ? consoleButton("open-dashboard") : null),
+    sites?.length ? h("Row", { gap: 8, width: "100%", minWidth: 0, wrap: true },
+      h("Select", { key: "site", label: "选择站点", value: selected, basis: 156, grow: 1, minWidth: 120, fontSize: 12, tooltip: currentSite()?.domain, items: sites.map(s => ({ value: s.id, label: s.domain })), onChange: selectSite }),
+      h("Select", { key: "period", label: "时间范围", value: period, items: items(PERIODS), onChange: selectPeriod, basis: 112, minWidth: 104, grow: 1 })) : null);
+}
+function comparisonLabel() {
+  const range = stats?.query.period || period;
+  return ({ "24h": "较前 24 小时", "7d": "较前 7 天", "30d": "较前 30 天", "90d": "较前 90 天", "12mo": "较前 12 个月" })[range] || "较前一时段";
+}
+function MetricGrid() {
+  return h("Column", { key: "metric-grid", opacity: regionOpacity("stats"), gap: 8, width: "100%", minWidth: 0 }, ["流量规模", "访问质量"].map((group, index) =>
+    h("Column", { gap: 2, width: "100%", minWidth: 0 },
+      h("Row", { gap: 8, width: "100%", alignItems: "center" }, muted(group, { fontWeight: 500 }), index === 0 ? muted(comparisonLabel(), { key: "comparison-label", grow: 1, textAlign: "end", tooltip: "由服务端按前一等长时段比较；当前时段未结束时，按同样已过去时长比较。" }) : null),
+      h("Row", { wrap: true, gap: 4, padding: 4, radius: 10, background: "surfaceHover", width: "100%", minWidth: 0 }, METRICS.slice(index * 3, index * 3 + 3).map(([key, label]) => {
+        const active = key === metric;
+        return h("ButtonBase", { key: "metric-" + key, label: label + "趋势" + (active ? "，已选中" : ""), tooltip: active ? "当前趋势：" + label : "查看" + label + "趋势", basis: "30%", grow: 1, minWidth: 84, padding: [2, 4], radius: 6,
+          border: [1, active ? "border" : "surfaceHover"], background: active ? "surface" : "surfaceHover", opacity: active ? regionOpacity("metric") : 1, focusRing: false, focusVisible: { border: [1, "focus"] },
+          hover: { background: active ? "surface" : "surfacePressed" }, pressed: { background: "surfacePressed" },
+          onClick: () => selectMetric(key) },
+          h("Column", { gap: 0, width: "100%", minWidth: 0 },
+            txt(label, { fontSize: 11, fontWeight: active ? 600 : 400, textColor: "text", opacity: active ? 1 : 0.78, singleLine: true, minWidth: 0 }),
+            txt(format(key, stats?.current[key]), { key: "value-" + key, fontSize: 17, fontWeight: 500, fontFeatures: "tnum", minWidth: 0, singleLine: true, tooltip: stats ? String(stats.current[key]) : "尚无数据" }),
+            h("Row", { gap: 4, width: "100%", alignItems: "center", minWidth: 0 },
+              muted(stats ? change(stats.current[key], stats.previous?.[key]) : "—", { key: "delta-" + key, grow: 1, minWidth: 0, fontFeatures: "tnum", tooltip: "较前一等长时段；正负号表示数值变化，不代表业务好坏。前期为零时不计算百分比。", singleLine: true }),
+              h("Icon", { key: "selection-" + key, label: active ? "已选中" : "", opacity: active ? 1 : 0, width: 10, height: 10, shrink: 0, textColor: "text", svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l3 3 7-7"/></svg>' }))));
+      })))));
+}
+function Trend() {
+  const name = METRICS.find(m => m[0] === metric)[1], points = stats?.points;
+  const dateLabel = p => stats.query.interval === "hour" ? p.date.slice(11, 16) : stats.query.interval === "month" ? p.date.slice(0, 7) : p.date.slice(5, 10);
+  return h("Column", { key: "trend-region", opacity: regionOpacity("trend"), gap: 4, width: "100%", minWidth: 0 },
+    h("Row", { alignItems: "center", gap: 8, width: "100%", wrap: true }, txt(name + "趋势", { key: "trend-title", fontSize: 13, fontWeight: 600, grow: 1 }), muted("按站点时区")),
+    points?.length ? h("Column", { gap: 0, width: "100%", minWidth: 0 },
+      h("Chart", { key: "traffic-chart", type: "line", height: 72, width: "100%", minWidth: 0, xKind: "category", axes: { x: false, y: true },
+        curve: "linear", strokeWidth: 2, yTicks: 3, gridStyle: "dashed", hover: true, appear: false, dots: points.length === 1,
+        yDomain: [0, Math.max(metric === "bounce_rate" ? 100 : 1, ...points.map(p => p[metric]))],
+        series: [{ name, color: INK, fill: false, points: points.map((p, i) => ({ x: i, y: p[metric], label: p.date.replace("T", " ") + " " + stats.query.timezone, valueLabel: format(metric, p[metric]) })) }], label: name + "，站点时区 " + stats.query.timezone }),
+      h("Row", { key: "trend-dates", width: "100%", minWidth: 0, padding: [0, 4, 0, 32], height: 16, alignItems: "center" },
+        [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])].map((index, position, ticks) => muted(dateLabel(points[index]), { key: "trend-date-" + position, basis: 0, grow: 1, minWidth: 0, singleLine: true, textAlign: position === 0 ? "start" : position === ticks.length - 1 ? "end" : "center", tooltip: points[index].date.replace("T", " ") + " " + stats.query.timezone }))))
+      : muted(busy ? "正在读取趋势…" : stats ? "此时段没有时间桶" : "趋势尚不可用", { key: "trend-empty", height: 80, width: "100%", textAlign: "center" }),
+    stats ? muted(stats.query.from + " — " + stats.query.to + "  " + stats.query.timezone, { key: "range-caption", wrap: true, tooltip: "访客标识每天轮换；跨日访客数不是整个时段去重人数。" }) : null);
+}
+function closeDimensionPicker() { showDimensionPicker(false); }
+function DimensionPicker() {
+  return h("Column", { key: "dimension-picker", grow: 1, minHeight: 0, width: "100%", minWidth: 0 },
+    h("Row", { padding: [4, 12, 8, 12], gap: 8, width: "100%", alignItems: "center", shrink: 0 },
+      button("dimension-back", "返回", closeDimensionPicker),
+      txt("选择排行类别", { fontSize: 14, fontWeight: 600, grow: 1 }), muted(busy ? "读取中…" : "19 项", { key: "dimension-status", shrink: 0 })),
+    h("Scroll", { key: "dimension-scroll", grow: 1, minHeight: 0, width: "100%", scrollbars: true, scrollbarInsets: [4, 2, 4, 2] },
+      h("Column", { padding: [0, 12, 8, 12], gap: 2, width: "100%", minWidth: 0 }, DIMS.map(([value, label]) =>
+        h("ButtonBase", { key: "dimension-option-" + value, label: label + (dimension === value ? "，已选中" : ""), width: "100%", minWidth: 0, height: 32, shrink: 0, paddingX: 10, radius: 6,
+          background: dimension === value ? "surfaceHover" : "surface", focusRing: true, hover: { background: "surfaceHover" }, pressed: { background: "surfacePressed" },
+          onClick: () => chooseDimension(value) },
+          h("Row", { gap: 8, width: "100%", alignItems: "center" }, txt(label, { grow: 1, singleLine: true }), dimension === value ? txt("✓", { label: "已选中", shrink: 0 }) : null))))));
+}
+function Ranking() {
+  return h("Column", { key: "ranking-region", opacity: regionOpacity("ranking"), gap: 6, width: "100%", minWidth: 0 },
+    h("Row", { alignItems: "center", gap: 8, width: "100%", minWidth: 0 },
+      txt("排行", { fontSize: 13, fontWeight: 600, grow: 1 }),
+      h("ButtonBase", { key: "dimension", label: "选择排行类别，当前：" + DIMS.find(([value]) => value === dimension)[1], tooltip: "打开全部排行类别，可滚动选择", onClick: () => showDimensionPicker(true), height: 28, paddingX: 8, radius: 6, background: "surfaceHover", focusRing: true, hover: { background: "surfacePressed" }, minWidth: 0 },
+        h("Row", { gap: 6, alignItems: "center", minWidth: 0 }, txt(DIMS.find(([value]) => value === dimension)[1], { fontSize: 12, singleLine: true }),
+          h("Icon", { width: 10, height: 10, shrink: 0, svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l5 5-5 5"/></svg>' })))),
+    h("Row", { width: "100%", paddingX: 4, alignItems: "center" }, muted("点击条目筛选", { grow: 1 }), muted("访客", { shrink: 0, tooltip: "占比以当前范围及筛选条件下的访客数为分母；同一访客可属于多行，占比合计可能超过 100%。排行更新：" + stamp(rankAt) })),
+    ErrorNotice("ranking"),
+    ranking?.rows.length ? ranking.rows.map((row, i) => {
+      const share = ranking.total ? Math.min(100, row.visitors / ranking.total * 100) : 0;
+      return h("ButtonBase", { key: "rank-" + i, label: "筛选 " + emptyLabel(dimension, row.value), onClick: () => addFilter(row.value), padding: [5, 4], width: "100%", minWidth: 0, radius: 6, focusRing: true, hover: { background: "surfaceHover" }, pressed: { background: "surfacePressed" }, tooltip: emptyLabel(dimension, row.value) + "\n访客 " + full(row.visitors) + " · " + (dimension === "event" ? "完成次数 " : ["entry_page", "exit_page"].includes(dimension) ? "访问次数 " : "浏览量 ") + full(row.count) },
+        h("Column", { gap: 4, width: "100%", minWidth: 0 },
+          h("Row", { gap: 12, width: "100%", minWidth: 0, alignItems: "center" }, txt(emptyLabel(dimension, row.value), { key: "rank-label-" + i, fontSize: 12, grow: 1, minWidth: 0, singleLine: true }),
+            txt(full(row.visitors), { fontSize: 12, fontWeight: 500, fontFeatures: "tnum", textAlign: "end", shrink: 0 })),
+          h("Row", { gap: 10, width: "100%", alignItems: "center" },
+            h("Box", { grow: 1, minWidth: 0, height: 3, background: "surfaceHover", radius: 2 }, h("Box", { width: share + "%", height: 3, background: "textMuted", opacity: 0.6, radius: 2 })),
+            muted(share.toFixed(1) + "%", { width: 46, textAlign: "end", fontFeatures: "tnum", shrink: 0 }))));
+    }) : muted(busy ? "正在读取排行…" : ranking ? "没有匹配的访问记录" : "排行尚不可用", { key: "ranking-empty", paddingY: 14, wrap: true }));
+}
+function Goals() {
+  if (!goals?.rows.length) return null;
+  return h("Column", { key: "goals-section", gap: 6, width: "100%", minWidth: 0 },
+    h("Divider"),
+    h("Row", { gap: 8, width: "100%", alignItems: "center" },
+      txt("目标", { fontSize: 13, fontWeight: 600, grow: 1 }),
+      muted("自定义事件", { tooltip: "点击事件筛选；跟随当前站点、日期和筛选条件。更新：" + stamp(goalsAt) })),
+    goals.rows.map((row, i) => h("ButtonBase", { key: "goal-" + i, label: "筛选自定义事件：" + row.value, onClick: () => addFilter(row.value, "event"), width: "100%", minWidth: 0, padding: [6, 4], radius: 6, focusRing: true, hover: { background: "surfaceHover" }, pressed: { background: "surfacePressed" }, tooltip: row.value + "\n访客 " + full(row.visitors) + " · 完成 " + full(row.count) + " 次" },
+      h("Column", { gap: 3, width: "100%", minWidth: 0 },
+        txt(row.value, { key: "goal-name-" + i, fontSize: 12, fontWeight: 500, singleLine: true, minWidth: 0 }),
+        h("Row", { gap: 12, width: "100%", minWidth: 0, wrap: true },
+          muted(full(row.visitors) + " 位访客", { key: "goal-visitors-" + i, fontFeatures: "tnum", grow: 1 }),
+          muted("完成 " + full(row.count) + " 次", { key: "goal-count-" + i, fontFeatures: "tnum", textAlign: "end" }))))));
+}
+function Body() {
+  if (setupError || !config.key) return h("Scroll", { key: "setup-scroll", grow: 1, minHeight: 0, width: "100%", scrollbars: true, scrollbarInsets: [4, 2, 4, 2] },
+    h("Column", { padding: 12, gap: 10, width: "100%", minWidth: 0 },
+      txt("连接你的流量数据", { key: "setup", fontSize: 18, fontWeight: 600, wrap: true }),
+      muted(setupError || "在看板设置中填写 tinytraffic 服务地址和只读 API Key。", { wrap: true, fontSize: 12 }),
+      muted("在 tinytraffic 的 Account → API keys 创建 Read only 密钥。连接后即可切换站点、查看趋势与筛选访客来源。", { wrap: true, fontSize: 12 }),
+      config.base ? consoleButton("setup-open", { alignSelf: "start", border: [1, "border"] }) : null));
+  return h("Scroll", { key: "content-scroll", grow: 1, minHeight: 0, width: "100%", scrollbars: true, scrollbarInsets: [4, 2, 4, 2] },
+    h("Column", { key: "content-region", opacity: regionOpacity("content"), gap: 8, width: "100%", minWidth: 0, padding: [4, 12, 10, 12] },
+      ErrorNotice("sites"), ErrorNotice("preferences"),
+      sites === null ? muted(busy ? "正在连接并读取站点…" : "尚未连接，请点击刷新。", { key: "sites-pending", paddingY: 24, wrap: true })
+      : !sites.length ? h("Column", { gap: 8, width: "100%" }, txt("还没有站点", { key: "no-sites", fontSize: 20, fontWeight: 600 }), muted("在 tinytraffic 中添加站点和追踪脚本，然后刷新。", { wrap: true }), consoleButton("add-site-web", { alignSelf: "start" }))
+      : h("Column", { gap: 8, width: "100%", minWidth: 0 },
+        h("Row", { gap: 4, width: "100%", minWidth: 0, alignItems: "center", wrap: true },
+          muted(realtime == null ? "近 5 分钟快照 —" : "近 5 分钟快照 " + full(realtime) + " 人", { key: "live-count", grow: 1, singleLine: true, fontFeatures: "tnum", tooltip: "整个站点的活跃访客，不受日期范围和筛选影响；随整体刷新间隔更新。" }),
+          muted(liveAt ? "采样 " + stamp(liveAt) + (errors.realtime ? " · 旧值" : "") : "尚未采样", { key: "live-sampled", wrap: true, textColor: errors.realtime ? "warning" : "text" })),
+        period === "custom" ? h("Column", { gap: 6, width: "100%" },
+          h("Row", { gap: 6, width: "100%", wrap: true },
+            h("TextInput", { key: "date-from", label: "开始日期", placeholder: "YYYY-MM-DD", value: draftFrom, basis: 104, grow: 1, minWidth: 104, onChange: value => { draftFrom = String(value); } }),
+            h("TextInput", { key: "date-to", label: "结束日期", placeholder: "YYYY-MM-DD", value: draftTo, basis: 104, grow: 1, minWidth: 104, onChange: value => { draftTo = String(value); } }),
+            button("apply-dates", "应用", applyDates, { shrink: 0 })), ErrorNotice("dates")) : null,
+        filters.length ? h("Column", { key: "filters", gap: 4, width: "100%" },
+          h("Row", { gap: 6, width: "100%", alignItems: "center" }, txt("已筛选 " + filters.length + " 项", { fontSize: 12, fontWeight: 600, grow: 1 }), button("clear-filters", "清除筛选", resetFilters)),
+          filters.map((f, i) => button("filter-" + i, DIMS.find(d => d[0] === f.dim)[1] + "：" + emptyLabel(f.dim, f.value) + "  ×", () => removeFilter(i), { width: "100%", minWidth: 0, tooltip: "移除此筛选：" + f.value, background: "surfaceHover" }))) : null,
+        ErrorNotice("filters"), ErrorNotice("stats"), MetricGrid(), Trend(),
+        h("Divider"), Ranking(), Goals(), errors.goals ? muted("目标读取失败：" + errors.goals + (goals?.rows.length ? "（保留 " + stamp(goalsAt) + " 的旧值）" : ""), { key: "error-goals", textColor: "warning", wrap: true, width: "100%" }) : null, ErrorNotice("realtime"))));
+}
+function view() {
+  const site = currentSite(), problem = setupError || Object.values(errors).join(" ");
+  const body = Body();
+  body.props.hidden = displayedDimension;
+  return {
+    tray: { icon: "data:image/svg+xml," + encodeURIComponent(MARK), iconTemplate: true,
+      title: stats ? format("visitors", stats.current.visitors) : "", error: problem,
+      tooltip: site ? site.domain + " · " + (stats ? format("visitors", stats.current.visitors) + " 访客 · " + stats.query.from + " 至 " + stats.query.to : "统计尚不可用") + (filters.length ? " · 已筛选" : "") + (realtime == null ? "" : " · 近5分钟快照 " + realtime + "，采样 " + stamp(liveAt)) : "tinytraffic · 网站流量观察",
+      menu: [{ label: "刷新", onClick: () => load(), disabled: busy || !config.key || !!setupError }, { label: "打开控制台", onClick: openDashboard, disabled: !config.base }] },
+    panel: h("Column", { preferredWidth: 340, preferredHeight: !config.key || setupError ? 280 : 480, width: "100%", height: "100%", minWidth: 0, minHeight: 0, safeArea: true, background: "surface", textColor: "text", fontSize: 12,
+      shortcuts: { "CmdOrCtrl+R": () => load(), ...(choosingDimension ? { Escape: closeDimensionPicker } : {}) } }, Header(),
+      h("Column", { key: "page-transition", grow: 1, minHeight: 0, minWidth: 0, width: "100%", opacity: pickerOpacity(), ignoreInput: displayedDimension !== choosingDimension }, body, displayedDimension ? DimensionPicker() : null), h("Divider"),
+      h("Row", { padding: [8, 12], gap: 12, width: "100%", alignItems: "center", shrink: 0 },
+        h("Column", { gap: 2, grow: 1, minWidth: 0 },
+          muted(busy ? "正在更新…" : loadedAt ? "更新 " + stamp(loadedAt) + (Object.keys(errors).length ? " · 部分数据未更新" : "") : "等待连接", { key: "refresh-status", minWidth: 0, wrap: true, tooltip: "汇总与趋势最近成功更新时间；各分项失败时保留各自旧数据。" }),
+          muted(refreshMinutes % 60 === 0 ? "每 " + refreshMinutes / 60 + " 小时自动刷新" : "每 " + refreshMinutes + " 分钟自动刷新", { key: "refresh-frequency", fontSize: 10, opacity: 0.65, tooltip: "自动刷新间隔，可在看板设置中修改。活跃数与统计一起更新。" })),
+        h("ButtonBase", { key: "refresh", label: "刷新", onClick: () => load(), disabled: busy || !config.key || !!setupError, height: 30, paddingX: 10, radius: 6, background: "surfaceHover", focusRing: true, hover: { background: "surfacePressed" }, shrink: 0 },
+          h("Row", { gap: 6, alignItems: "center" },
+            busy ? h("Loading", { key: "refresh-loading", label: "正在更新", variant: "arc", size: 12, color: "textMuted", paused: !motionAllowed() })
+              : h("Icon", { width: 12, height: 12, svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/></svg>' }),
+            txt("刷新", { fontSize: 12, singleLine: true })))))
+  };
+}
+export default {
+  async scheduled(env) { sync(env); await load(); },
+  render(env) { sync(env); return view(); },
+  event(name, payload) {
+    if (name === "lifecycle" && payload?.type === "start" && !workerLive) {
+      $metrix.schedule(refreshMinutes * 60000);
+      workerLive = true;
+      if (typeof globalThis.matchMedia === "function") {
+        reducedMotion = globalThis.matchMedia("(prefers-reduced-motion: reduce)");
+        reducedMotion.addEventListener("change", motionPreferenceChanged);
+      }
+    }
+    if (name === "lifecycle" && payload?.type === "stop") {
+      workerLive = false; cancel(); settleMotion();
+      reducedMotion?.removeEventListener("change", motionPreferenceChanged); reducedMotion = null;
+    }
+  },
+};
+  ]]></script>
+</bar>

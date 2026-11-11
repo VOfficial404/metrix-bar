@@ -1,0 +1,337 @@
+<bar protocol-version="0" id="tinytraffic" title="tinytraffic"
+     version="1.0.0-local.4" category="analytics" icon="chart.bar"
+     description="网站流量观察：多站点、实时访客、六项指标、趋势与可筛选排行。"
+     license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
+     refresh="3h" material="solid">
+  <permissions>
+    <network origin="{{ inputs.base_url }}" />
+  </permissions>
+  <inputs>
+    <input name="base_url" type="string" label="连接 · tinytraffic 服务地址" default="http://127.0.0.1:8080" required="true"
+           help="填写完整服务源地址，例如 https://stats.example.com；支持 HTTPS 或本机 HTTP，不包含 /api 路径。" />
+    <input name="api_key" type="secret" label="连接 · 只读 API Key"
+           help="在 tinytraffic 的 Account → API keys 创建 Read only 密钥。密钥保存在系统密钥库。" />
+    <input name="refresh_minutes" type="integer" label="刷新 · 间隔（分钟）" default="180"
+           help="填写 1–1440 的整数，默认 180 分钟（3 小时）；清空或超出范围时使用 180 分钟。保存后生效，仍可随时手动刷新。" />
+    <input name="row_limit" type="select" label="展示 · 排行条数" default="5">
+      <option value="5" label="5 条" />
+      <option value="10" label="10 条" />
+      <option value="20" label="20 条" />
+    </input>
+  </inputs>
+  <docs><![CDATA[在本看板设置中填写 tinytraffic 服务地址和只读 API Key。密钥在 tinytraffic 的 Account → API keys 创建。选择站点和时间范围，点击指标切换趋势，点击排行添加筛选；活跃数表示上次更新时整个站点最近 5 分钟的访客。默认每 3 小时刷新，可在“刷新 · 间隔（分钟）”中自定义 1–1440 分钟，也可点击刷新或按 Ctrl/Cmd+R。]]></docs>
+  <script apis="localStorage shell"><![CDATA[
+// Native tinytraffic client. API contract: egoist/tinytraffic/docs/api.md (AGPL-3.0).
+const h = (type, props = {}, ...children) => ({ type, props, children: children.flat().filter(x => x != null && x !== false) });
+const txt = (value, props = {}) => h("Text", { text: String(value), ...props });
+const muted = (value, props = {}) => txt(value, { fontSize: 11, textColor: "textMuted", ...props });
+const INK = "#0D9488";
+const MARK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 18V13M9 18V6M14 18V10M19 18V3"/></svg>';
+const PERIODS = [["today", "今天"], ["yesterday", "昨天"], ["24h", "过去 24 小时"], ["7d", "近 7 天"], ["30d", "近 30 天"], ["90d", "近 90 天"], ["month", "本月"], ["lastmonth", "上月"], ["12mo", "近 12 个月"], ["all", "全部时间"], ["custom", "自定义日期"]];
+const METRICS = [["visitors", "访客"], ["visits", "访问次数"], ["pageviews", "浏览量"], ["views_per_visit", "每次访问页数"], ["bounce_rate", "跳出率"], ["visit_duration", "平均停留"]];
+const DIMS = [["source", "来源"], ["page", "页面"], ["hostname", "访问域名"], ["entry_page", "入口页"], ["exit_page", "出口页"], ["referrer", "引荐域名"], ["referrer_url", "引荐链接"], ["country", "国家 / 地区"], ["region", "区域"], ["city", "城市"], ["browser", "浏览器"], ["os", "操作系统"], ["device", "设备"], ["event", "自定义事件"], ["utm_source", "UTM 来源"], ["utm_medium", "UTM 媒介"], ["utm_campaign", "UTM 活动"], ["utm_content", "UTM 内容"], ["utm_term", "UTM 关键词"]];
+const has = (items, key) => items.some(item => item[0] === key);
+const items = list => list.map(([value, label]) => ({ value, label }));
+const num = n => typeof n === "number" && Number.isFinite(n) && n >= 0;
+const integer = n => Number.isSafeInteger(n) && n >= 0;
+const full = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+function format(key, n) {
+  if (n == null) return "—";
+  if (key === "bounce_rate") return n.toFixed(1) + "%";
+  if (key === "views_per_visit") return n.toFixed(2);
+  if (key === "visit_duration") {
+    const seconds = Math.round(n);
+    return seconds < 60 ? seconds + "秒" : seconds < 3600 ? Math.floor(seconds / 60) + "分" + seconds % 60 + "秒" : Math.floor(seconds / 3600) + "时" + Math.floor(seconds % 3600 / 60) + "分";
+  }
+  return n >= 1e8 ? (n / 1e8).toFixed(1) + "亿" : n >= 1e4 ? (n / 1e4).toFixed(1) + "万" : full(n);
+}
+function change(key, current, previous) {
+  if (previous == null) return { text: "无对比", color: "textMuted" };
+  if (previous === 0) return { text: current === 0 ? "0%" : "前期为 0", color: "textMuted" };
+  const delta = (current - previous) / previous * 100;
+  return { text: (delta > 0 ? "+" : "") + delta.toFixed(1) + "%", color: Math.abs(delta) < 0.05 ? "textMuted" : (delta > 0) !== (key === "bounce_rate") ? "success" : "danger" };
+}
+function validDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const ms = Date.parse(value + "T00:00:00Z");
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === value;
+}
+function endpoint(value) {
+  const u = new URL(String(value).trim());
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) throw new Error("服务地址须使用 HTTPS；本机服务可使用 HTTP。");
+  if (u.href.includes("@") || u.search || u.hash || u.pathname !== "/") throw new Error("请填写服务源地址，不包含账号、路径、查询或片段。");
+  return u.origin;
+}
+function metrics(raw) {
+  if (!raw || METRICS.some(([key]) => !num(raw[key])) || ["visitors", "visits", "pageviews"].some(key => !integer(raw[key])) || raw.bounce_rate > 100) throw new Error("指标响应格式无效。");
+  return Object.fromEntries(METRICS.map(([key]) => [key, raw[key]]));
+}
+function queryMeta(raw, requested) {
+  if (!raw || raw.period !== requested.period || !validDate(raw.from) || !validDate(raw.to) || raw.from > raw.to || typeof raw.timezone !== "string" || !raw.timezone || !["hour", "day", "month"].includes(raw.interval) || !Array.isArray(raw.filters)) throw new Error("统计范围响应无效。");
+  const fs = raw.filters.map(f => {
+    if (!f || !has(DIMS, f.dim) || typeof f.value !== "string") throw new Error("筛选响应无效。");
+    return f.dim + ":" + f.value;
+  }).sort();
+  const expectedFrom = raw.interval === "month" ? requested.from.slice(0, 7) + "-01" : requested.from;
+  if (JSON.stringify(fs) !== JSON.stringify(requested.filters.map(f => f.dim + ":" + f.value).sort()) || (requested.period === "custom" && (raw.from !== expectedFrom || raw.to !== requested.to))) throw new Error("返回的统计范围与所选条件不一致。");
+  return { period: raw.period, from: raw.from, to: raw.to, interval: raw.interval, timezone: raw.timezone, filters: raw.filters };
+}
+function series(raw) {
+  if (!Array.isArray(raw) || raw.length > 20000) throw new Error("趋势响应格式无效。");
+  let last = "";
+  return raw.map(row => {
+    if (!row || typeof row.date !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(row.date) || !validDate(row.date.slice(0, 10)) || row.date.slice(11, 13) > "23" || row.date.slice(14, 16) > "59" || row.date.slice(17, 19) > "59" || row.date < last) throw new Error("趋势时间桶无效。");
+    last = row.date;
+    return { date: row.date, ...metrics(row) };
+  });
+}
+function breakdown(raw) {
+  if (!raw || !integer(raw.total_visitors) || !Array.isArray(raw.rows) || raw.rows.length > 1000) throw new Error("排行响应格式无效。");
+  return { total: raw.total_visitors, rows: raw.rows.map(row => {
+    if (!row || typeof row.value !== "string" || !integer(row.visitors) || !integer(row.count)) throw new Error("排行数据无效。");
+    return { value: row.value, visitors: row.visitors, count: row.count };
+  }) };
+}
+let config = null, setupError = "", sites = null, selected = "", period = "7d", metric = "visitors", dimension = "source";
+let from = "", to = "", draftFrom = "", draftTo = "", filters = [], stats = null, ranking = null, realtime = null;
+let errors = {}, loadedAt = 0, liveAt = 0, rankAt = 0, generation = 0, controller = null, inflight = null, busy = false;
+let refreshMinutes = 180, workerLive = false;
+const currentSite = () => (sites || []).find(s => s.id === selected);
+const preferencesKey = () => "tinytraffic:view:v1:" + config.base;
+function persist() {
+  try { localStorage.setItem(preferencesKey(), JSON.stringify({ selected, period, metric, dimension, from, to })); delete errors.preferences; }
+  catch { errors.preferences = "展示偏好未保存，下次启动可能恢复默认值。"; }
+}
+function cancel() {
+  generation++;
+  controller?.abort();
+  controller = null; inflight = null; busy = false;
+}
+function clearQuery(clearLive = false) {
+  cancel(); stats = null; ranking = null; loadedAt = 0; rankAt = 0; errors = {};
+  if (clearLive) { realtime = null; liveAt = 0; }
+}
+function sync(env) {
+  const minutes = env.inputs.refresh_minutes;
+  const nextMinutes = Number.isSafeInteger(minutes) && minutes >= 1 && minutes <= 1440 ? minutes : 180;
+  if (nextMinutes !== refreshMinutes) {
+    if (workerLive) $metrix.schedule(nextMinutes * 60000);
+    refreshMinutes = nextMinutes;
+  }
+  const raw = String(env.inputs.base_url || "").trim();
+  let key = "";
+  try { key = String($metrix.secret("api_key") || "").trim(); } catch {}
+  const limit = [5, 10, 20].includes(Number(env.inputs.row_limit)) ? Number(env.inputs.row_limit) : 5;
+  if (config?.raw === raw && config.key === key && config.limit === limit) return;
+  const previous = config;
+  clearQuery(true); sites = null; filters = []; setupError = "";
+  config = { raw, key, limit, base: "" };
+  try { config.base = endpoint(raw); } catch (e) { setupError = e instanceof Error ? e.message : "请填写有效服务地址。"; }
+  if (!config.base || previous?.base !== config.base || previous?.key !== key) {
+    selected = ""; period = "7d"; metric = "visitors"; dimension = "source"; from = to = draftFrom = draftTo = "";
+    if (config.base) try {
+      const p = JSON.parse(localStorage.getItem(preferencesKey()) || "{}");
+      if (typeof p.selected === "string" && /^\d+$/.test(p.selected)) selected = p.selected;
+      if (has(PERIODS, p.period) && p.period !== "custom") period = p.period;
+      if (has(METRICS, p.metric)) metric = p.metric;
+      if (has(DIMS, p.dimension)) dimension = p.dimension;
+      if (validDate(p.from) && validDate(p.to) && p.from <= p.to) { from = draftFrom = p.from; to = draftTo = p.to; if (p.period === "custom") period = "custom"; }
+    } catch {}
+  }
+}
+function queryString(q) {
+  const params = new URLSearchParams({ period: q.period });
+  if (q.period === "custom") { params.set("from", q.from); params.set("to", q.to); }
+  for (const f of q.filters) params.append("f", f.dim + ":" + f.value);
+  return params.toString();
+}
+async function api(path, connection, signal) {
+  let res;
+  try { res = await fetch(connection.base + "/api/v1" + path, { signal, redirect: "error", headers: { Accept: "application/json", Authorization: "Bearer " + connection.key } }); }
+  catch { throw new Error(signal.aborted ? "请求已取消或超时。" : "无法连接 tinytraffic，请检查服务地址与网络。"); }
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new Error(({ 401: "API Key 无效或已撤销，请在设置中更换。", 403: "API Key 没有读取权限。", 404: "站点或 API 不存在，请检查 tinytraffic 版本。", 429: "请求频率受限，请稍后刷新。" })[res.status] || "服务返回 HTTP " + res.status + "。");
+  }
+  try { return await res.json(); } catch { throw new Error("服务未返回有效 JSON。"); }
+}
+function load(reloadSites = true) {
+  if (!config?.base || !config.key || setupError) return Promise.resolve();
+  if (inflight) return inflight;
+  if (period === "custom" && (!validDate(from) || !validDate(to) || from > to)) return Promise.resolve();
+  const c = controller = new AbortController(), g = ++generation, connection = config;
+  const q = { period, from, to, filters: filters.map(f => ({ ...f })) }, dim = dimension;
+  const timeout = setTimeout(() => c.abort(), 12000);
+  busy = true; delete errors.sites; $metrix.invalidate();
+  inflight = (async () => {
+    try {
+      if (reloadSites || sites === null) {
+        const raw = await api("/sites", connection, c.signal);
+        if (!Array.isArray(raw) || raw.some(s => !s || !integer(s.id) || !s.id || typeof s.domain !== "string" || !s.domain || typeof s.timezone !== "string") || new Set(raw.map(s => s.id)).size !== raw.length) throw new Error("站点列表响应无效。");
+        if (g !== generation) return;
+        sites = raw.map(s => ({ id: String(s.id), domain: s.domain, timezone: s.timezone }));
+        if (!currentSite()) { selected = sites[0]?.id || ""; stats = ranking = realtime = null; loadedAt = liveAt = rankAt = 0; filters = []; q.filters = []; persist(); }
+      }
+      if (!selected || g !== generation) return;
+      const path = "/sites/" + encodeURIComponent(selected), qs = queryString(q);
+      const result = await Promise.allSettled([
+        Promise.all([api(path + "/aggregate?" + qs, connection, c.signal), api(path + "/timeseries?" + qs, connection, c.signal)]).then(([a, t]) => {
+          const meta = queryMeta(a.query, q), tm = queryMeta(t.query, q);
+          if (meta.from !== tm.from || meta.to !== tm.to || meta.interval !== tm.interval || meta.timezone !== tm.timezone) throw new Error("汇总与趋势的统计范围不一致，请刷新。");
+          return { current: metrics(a.current), previous: a.previous === null ? null : metrics(a.previous), query: meta, points: series(t.points) };
+        }),
+        api(path + "/breakdown/" + dim + "?" + qs + "&limit=" + connection.limit, connection, c.signal).then(breakdown),
+        api(path + "/realtime", connection, c.signal).then(raw => { if (!integer(raw?.visitors)) throw new Error("实时访客响应无效。"); return raw.visitors; }),
+      ]);
+      if (g !== generation) return;
+      for (let i = 0; i < result.length; i++) {
+        const key = ["stats", "ranking", "realtime"][i], r = result[i];
+        if (r.status === "rejected") errors[key] = r.reason.message;
+        else {
+          delete errors[key];
+          if (i === 0) { stats = r.value; loadedAt = Date.now(); }
+          if (i === 1) { ranking = r.value; rankAt = Date.now(); }
+          if (i === 2) { realtime = r.value; liveAt = Date.now(); }
+        }
+      }
+    } catch (e) { if (g === generation) errors.sites = e.message; }
+    finally { clearTimeout(timeout); if (g === generation) { controller = null; inflight = null; busy = false; $metrix.invalidate(); } }
+  })();
+  return inflight;
+}
+function selectSite(value) {
+  if (value === selected || !(sites || []).some(s => s.id === value)) return;
+  clearQuery(true); selected = value; filters = []; persist(); return load(false);
+}
+function selectPeriod(value) {
+  if (!has(PERIODS, value) || value === period) return;
+  clearQuery(); period = value; persist(); $metrix.invalidate(); return load(false);
+}
+function applyDates() {
+  if (!validDate(draftFrom) || !validDate(draftTo) || draftFrom > draftTo) { errors.dates = "请填写有效的起止日期，开始日期不能晚于结束日期。"; $metrix.invalidate(); return; }
+  clearQuery(); from = draftFrom; to = draftTo; persist(); return load(false);
+}
+function selectDimension(value) {
+  if (!has(DIMS, value) || value === dimension) return;
+  cancel(); dimension = value; ranking = null; rankAt = 0; delete errors.ranking; persist(); return load(false);
+}
+function addFilter(value) {
+  if (filters.some(f => f.dim === dimension && f.value === value)) return;
+  if (filters.length >= 10) { errors.filters = "最多同时应用 10 项筛选，请先移除一项。"; $metrix.invalidate(); return; }
+  clearQuery(); filters = [...filters, { dim: dimension, value }]; return load(false);
+}
+function removeFilter(index) { clearQuery(); filters = filters.filter((_, i) => i !== index); return load(false); }
+function resetFilters() { clearQuery(); filters = []; return load(false); }
+const openDashboard = () => { if (config?.base) $metrix.openURL(config.base + (selected ? "/sites/" + encodeURIComponent(selected) : "/")); };
+const button = (key, label, action, props = {}) => h("ButtonBase", { key, label, onClick: action, focusRing: true, radius: 6, paddingX: 8, height: 28, hover: { background: "surfaceHover" }, pressed: { background: "surfacePressed" }, ...props }, txt(label, { fontSize: 12, singleLine: true, minWidth: 0, shrink: 1 }));
+function consoleButton(key, props = {}) {
+  return h("ButtonBase", { key, label: "打开控制台", tooltip: "在浏览器中打开" + (currentSite() ? "当前站点控制台：" + currentSite().domain : " tinytraffic 控制台"), onClick: openDashboard, focusRing: true, height: 28, paddingX: 6, radius: 5, shrink: 0, hover: { background: "surfaceHover" }, ...props },
+    h("Row", { gap: 4, alignItems: "center" }, txt("控制台", { fontSize: 12, singleLine: true }),
+      h("Icon", { width: 13, height: 13, svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7M21 3l-11 11M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>' })));
+}
+const stamp = time => time ? new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "尚未更新";
+const emptyLabel = (dim, value) => value || (["source", "referrer", "referrer_url"].includes(dim) ? "直接访问" : "未知 / 未设置");
+function ErrorNotice(key) {
+  return errors[key] ? muted(errors[key], { key: "error-" + key, textColor: "warning", wrap: true, width: "100%" }) : null;
+}
+function Header() {
+  return h("Column", { gap: 8, width: "100%", padding: [14, 18, 10, 18], shrink: 0 },
+    h("Row", { gap: 5, alignItems: "center", width: "100%" },
+      h("Icon", { svg: MARK, width: 16, height: 16, textColor: INK }), txt("tinytraffic", { fontSize: 13, fontWeight: 600, grow: 1, minWidth: 0, singleLine: true }),
+      h("Box", { width: 5, height: 5, radius: 3, background: errors.realtime ? "warning" : realtime > 0 ? "success" : "textMuted" }),
+      muted(realtime == null ? "实时 —" : full(realtime) + " 位活跃", { key: "live-count", singleLine: true, shrink: 0, tooltip: "上次更新时整个站点最近 5 分钟的访客快照，不受日期和筛选影响。更新：" + stamp(liveAt) + (errors.realtime ? "；更新失败，显示旧值" : ""), fontFeatures: "tnum" }),
+      config.base ? consoleButton("open-dashboard") : null),
+    sites?.length ? h("Row", { gap: 6, width: "100%", alignItems: "center", wrap: true },
+      h("Select", { key: "site", label: "选择站点", value: selected, basis: 140, grow: 1, minWidth: 120, items: sites.map(s => ({ value: s.id, label: s.domain })), onChange: selectSite }),
+      h("Select", { key: "period", label: "时间范围", value: period, items: items(PERIODS), onChange: selectPeriod, basis: 104, minWidth: 104, grow: 1 })) : null);
+}
+function MetricGrid() {
+  return h("Row", { key: "metric-grid", wrap: true, gap: 4, width: "100%", minWidth: 0 }, METRICS.map(([key, label]) => {
+    const d = stats ? change(key, stats.current[key], stats.previous?.[key]) : null;
+    return h("ButtonBase", { key: "metric-" + key, label: label + "趋势", basis: "30%", grow: 1, minWidth: 92, padding: [4, 4, 2, 4], radius: 4,
+      focusRing: true, hover: { background: "surfaceHover" }, onClick: () => { metric = key; persist(); $metrix.invalidate(); } },
+      h("Column", { gap: 2, width: "100%", minWidth: 0 },
+        muted(label, { singleLine: true, minWidth: 0, textColor: key === metric ? INK : "textMuted" }),
+        txt(format(key, stats?.current[key]), { key: "value-" + key, fontSize: 16, fontWeight: 600, fontFeatures: "tnum", minWidth: 0, singleLine: true, tooltip: stats ? String(stats.current[key]) : "尚无数据" }),
+        muted(d?.text || "—", { key: "delta-" + key, textColor: d?.color || "textMuted", fontFeatures: "tnum", tooltip: "较前一等长时段；前期为零时不计算百分比。", singleLine: true }),
+        h("Box", { width: "100%", height: 2, marginTop: 2, background: key === metric ? INK : "surface", radius: 1 })));
+  }));
+}
+function Trend() {
+  const name = METRICS.find(m => m[0] === metric)[1], points = stats?.points;
+  return h("Column", { gap: 6, width: "100%", minWidth: 0 },
+    h("Row", { alignItems: "center", gap: 6, width: "100%" }, h("Box", { width: 12, height: 2, background: INK }), txt(name + "趋势", { fontSize: 12, fontWeight: 500, grow: 1 }), muted("按站点时区")),
+    points?.length ? h("Chart", { key: "traffic-chart", type: "area", height: 100, width: "100%", minWidth: 0, xKind: "category", labels: points.map(p => stats.query.interval === "hour" ? p.date.slice(5, 10) + " " + p.date.slice(11, 16) : stats.query.interval === "month" ? p.date.slice(0, 7) : p.date.slice(5, 10)),
+      curve: "linear", strokeWidth: 2, xTicks: 3, yTicks: 3, gridStyle: "dashed", hover: true, appear: false, dots: points.length === 1,
+      yDomain: [0, Math.max(metric === "bounce_rate" ? 100 : 1, ...points.map(p => p[metric]))],
+      series: [{ name, color: INK, fill: 0.08, points: points.map((p, i) => ({ x: i, y: p[metric], label: p.date.replace("T", " ") + " " + stats.query.timezone, valueLabel: format(metric, p[metric]) })) }], label: name + "，站点时区 " + stats.query.timezone })
+      : muted(busy ? "正在读取趋势…" : stats ? "此时段没有时间桶" : "趋势尚不可用", { key: "trend-empty", height: 80, width: "100%", textAlign: "center" }),
+    stats ? muted(stats.query.from + " — " + stats.query.to + "  " + stats.query.timezone, { key: "range-caption", wrap: true, tooltip: "访客标识每天轮换；跨日访客数不是整个时段去重人数。" }) : null);
+}
+function Ranking() {
+  return h("Column", { gap: 2, width: "100%", minWidth: 0 },
+    h("Row", { alignItems: "center", gap: 8, width: "100%" },
+      h("Select", { key: "dimension", label: "排行维度", value: dimension, items: items(DIMS), onChange: selectDimension, grow: 1, minWidth: 0 }), muted("访客 / 占比", { shrink: 0 })),
+    ErrorNotice("ranking"),
+    ranking?.rows.length ? ranking.rows.map((row, i) => {
+      const share = ranking.total ? Math.min(100, row.visitors / ranking.total * 100) : 0;
+      return h("ButtonBase", { key: "rank-" + i, label: "筛选 " + emptyLabel(dimension, row.value), onClick: () => addFilter(row.value), padding: [3, 4], width: "100%", minWidth: 0, radius: 5, focusRing: true, hover: { background: "surfaceHover" }, tooltip: emptyLabel(dimension, row.value) + "\n访客 " + full(row.visitors) + " · " + (dimension === "event" ? "完成次数 " : ["entry_page", "exit_page"].includes(dimension) ? "访问次数 " : "浏览量 ") + full(row.count) },
+        h("Column", { gap: 3, width: "100%", minWidth: 0 },
+          h("Row", { gap: 8, width: "100%", minWidth: 0, alignItems: "center" }, txt(emptyLabel(dimension, row.value), { key: "rank-label-" + i, fontSize: 12, grow: 1, minWidth: 0, singleLine: true }),
+            txt(full(row.visitors), { fontSize: 12, fontFeatures: "tnum", shrink: 0 }), muted(share.toFixed(1) + "%", { width: 46, textAlign: "end", fontFeatures: "tnum", shrink: 0 })),
+          h("Box", { width: "100%", height: 2, background: "surfaceHover", radius: 1 }, h("Box", { width: share + "%", height: 2, background: INK, radius: 1 }))));
+    }) : muted(busy ? "正在读取排行…" : ranking ? "没有匹配的访问记录" : "排行尚不可用", { key: "ranking-empty", paddingY: 14, wrap: true }),
+    ranking ? muted("点击条目筛选全部统计", { tooltip: "分母是同一范围及筛选条件下的访客数；同一访客可属于多行，占比合计可能超过 100%。排行更新：" + stamp(rankAt) }) : null);
+}
+function Body() {
+  if (setupError || !config.key) return h("Scroll", { key: "setup-scroll", grow: 1, minHeight: 0, width: "100%" },
+    h("Column", { padding: 18, gap: 10, width: "100%", minWidth: 0 },
+      txt("连接你的流量数据", { key: "setup", fontSize: 18, fontWeight: 600, wrap: true }),
+      muted(setupError || "在看板设置中填写 tinytraffic 服务地址和只读 API Key。", { wrap: true, fontSize: 12 }),
+      muted("在 tinytraffic 的 Account → API keys 创建 Read only 密钥。连接后即可切换站点、查看趋势与筛选访客来源。", { wrap: true, fontSize: 12 }),
+      config.base ? consoleButton("setup-open", { alignSelf: "start", border: [1, "border"] }) : null));
+  return h("Scroll", { key: "content-scroll", grow: 1, minHeight: 0, width: "100%" },
+    h("Column", { gap: 8, width: "100%", minWidth: 0, padding: [6, 18, 18, 18] },
+      ErrorNotice("sites"), ErrorNotice("preferences"),
+      sites === null ? muted(busy ? "正在连接并读取站点…" : "尚未连接，请点击刷新。", { key: "sites-pending", paddingY: 24, wrap: true })
+      : !sites.length ? h("Column", { gap: 8, width: "100%" }, txt("还没有站点", { key: "no-sites", fontSize: 20, fontWeight: 600 }), muted("在 tinytraffic 中添加站点和追踪脚本，然后刷新。", { wrap: true }), consoleButton("add-site-web", { alignSelf: "start" }))
+      : h("Column", { gap: 8, width: "100%", minWidth: 0 },
+        period === "custom" ? h("Column", { gap: 6, width: "100%" },
+          h("Row", { gap: 6, width: "100%", wrap: true },
+            h("TextInput", { key: "date-from", label: "开始日期", placeholder: "YYYY-MM-DD", value: draftFrom, basis: 104, grow: 1, minWidth: 104, onChange: value => { draftFrom = String(value); } }),
+            h("TextInput", { key: "date-to", label: "结束日期", placeholder: "YYYY-MM-DD", value: draftTo, basis: 104, grow: 1, minWidth: 104, onChange: value => { draftTo = String(value); } }),
+            button("apply-dates", "应用", applyDates, { shrink: 0 })), ErrorNotice("dates")) : null,
+        filters.length ? h("Column", { key: "filters", gap: 4, width: "100%" },
+          filters.map((f, i) => button("filter-" + i, DIMS.find(d => d[0] === f.dim)[1] + "：" + emptyLabel(f.dim, f.value) + "  ×", () => removeFilter(i), { width: "100%", minWidth: 0, tooltip: "移除此筛选：" + f.value, background: "surfaceHover" })),
+          button("clear-filters", "清除筛选", resetFilters, { alignSelf: "start" })) : null,
+        ErrorNotice("filters"), ErrorNotice("stats"), MetricGrid(), Trend(),
+        h("Divider"), Ranking(), ErrorNotice("realtime"))));
+}
+function view() {
+  const site = currentSite(), problem = setupError || Object.values(errors).join(" ");
+  return {
+    tray: { icon: "data:image/svg+xml," + encodeURIComponent(MARK), iconTemplate: true,
+      title: stats ? format("visitors", stats.current.visitors) : "", error: problem,
+      tooltip: site ? site.domain + " · " + (stats ? format("visitors", stats.current.visitors) + " 访客 · " + stats.query.from + " 至 " + stats.query.to : "统计尚不可用") + (filters.length ? " · 已筛选" : "") + (realtime == null ? "" : " · 近5分钟 " + realtime) : "tinytraffic · 网站流量观察",
+      menu: [{ label: "刷新", onClick: () => load(), disabled: busy || !config.key || !!setupError }, { label: "打开控制台", onClick: openDashboard, disabled: !config.base }] },
+    panel: h("Column", { preferredWidth: 340, preferredHeight: !config.key || setupError ? 280 : 560, width: "100%", height: "100%", minWidth: 0, minHeight: 0, safeArea: true, background: "surface", textColor: "text", fontSize: 12,
+      shortcuts: { "CmdOrCtrl+R": () => load() } }, Header(), Body(), h("Divider"),
+      h("Row", { padding: [12, 18], gap: 6, width: "100%", alignItems: "center", shrink: 0 },
+        muted(busy ? "正在更新…" : loadedAt ? "更新 " + stamp(loadedAt) + (Object.keys(errors).length ? " · 部分数据未更新" : "") : "等待连接", { key: "refresh-status", grow: 1, minWidth: 0, singleLine: true }),
+        muted(refreshMinutes % 60 === 0 ? "每 " + refreshMinutes / 60 + " 小时" : "每 " + refreshMinutes + " 分钟", { key: "refresh-frequency", shrink: 0, tooltip: "自动刷新间隔，可在看板设置中修改。活跃数与统计一起更新。" }), button("refresh", "刷新", () => load(), { disabled: busy || !config.key || !!setupError })))
+  };
+}
+export default {
+  async scheduled(env) { sync(env); await load(); },
+  render(env) { sync(env); return view(); },
+  event(name, payload) {
+    if (name === "lifecycle" && payload?.type === "start" && !workerLive) {
+      $metrix.schedule(refreshMinutes * 60000);
+      workerLive = true;
+    }
+    if (name === "lifecycle" && payload?.type === "stop") { workerLive = false; cancel(); }
+  },
+};
+  ]]></script>
+</bar>

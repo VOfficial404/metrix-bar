@@ -22,6 +22,25 @@
       "docs": "打开看板扫码登录，在设置中选择需要的功能。详细说明：https://github.com/VOfficial404/metrix-bar/tree/main/dashboards/bilibili#readme",
       "sha256": "a17488a0d58947e72747aa8fd7c3894758b98b232f5c74c56ee3bf93f92b5fd2",
       "file": "bilibili/bilibili-account.a17488a0d58947e72747aa8fd7c3894758b98b232f5c74c56ee3bf93f92b5fd2.bar"
+    },
+    {
+      "id": "tinytraffic",
+      "name": "tinytraffic",
+      "protocol_version": "0",
+      "version": "1.0.0",
+      "category": "analytics",
+      "placements": [
+        "menubar"
+      ],
+      "open_mode": "flyout",
+      "window_style": "standard",
+      "description": "网站流量观察：多站点、活跃快照、六项指标、趋势、可筛选排行与自定义事件目标。",
+      "icon": "chart.bar",
+      "license": "AGPL-3.0-only",
+      "homepage": "https://github.com/VOfficial404/metrix-bar",
+      "docs": "在本看板设置中填写 tinytraffic 服务地址和只读 API Key。密钥在 tinytraffic 的 Account → API keys 创建。选择站点和时间范围，点击指标切换趋势，点击排行或目标事件添加筛选；无事件记录时隐藏目标板块。活跃数表示上次更新时整个站点最近 5 分钟的访客。默认每 3 小时刷新，可在“刷新 · 间隔（分钟）”中自定义 1–1440 分钟，也可点击刷新或按 Ctrl/Cmd+R。",
+      "sha256": "440540424ef1b87eb955e9e0031b8e8e439660fc24c674aa1f2b1e97c8393958",
+      "file": "tinytraffic/tinytraffic.440540424ef1b87eb955e9e0031b8e8e439660fc24c674aa1f2b1e97c8393958.bar"
     }
   ]
 }

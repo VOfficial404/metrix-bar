@@ -256,7 +256,7 @@
 
 ## 开发
 
-维护约定见 [AGENTS.md](../../AGENTS.md)。源码、用户说明、第三方声明与预览集中在本目录；行为测试与隔离响应位于 `tests/bilibili/`。应用内保留简短登录提示和本 README 入口。
+维护约定见 [AGENTS.md](../../.agent/AGENTS.md)。源码、用户说明、第三方声明与预览集中在本目录；行为测试与隔离响应位于 `tests/bilibili/`。应用内保留简短登录提示和本 README 入口。
 
 安装 [Bun](https://bun.sh/) 后，在仓库根目录按改动范围选择检查：
 

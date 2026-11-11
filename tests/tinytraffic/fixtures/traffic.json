@@ -1,0 +1,36 @@
+{
+  "now": "2026-11-11T08:00:00Z",
+  "inputs": {
+    "base_url": "http://127.0.0.1:8080",
+    "row_limit": "5"
+  },
+  "secrets": {
+    "api_key": "tt_fixture_only"
+  },
+  "http": [
+    {
+      "url": "http://127.0.0.1:8080/api/v1/sites/1/breakdown/event?period=7d&limit=5",
+      "body": "{\"total_visitors\":1842,\"rows\":[]}"
+    },
+    {
+      "url": "http://127.0.0.1:8080/api/v1/sites",
+      "body": "[{\"id\":1,\"domain\":\"studio.example\",\"timezone\":\"Asia/Shanghai\"},{\"id\":2,\"domain\":\"docs.example\",\"timezone\":\"America/New_York\"}]"
+    },
+    {
+      "url": "http://127.0.0.1:8080/api/v1/sites/1/aggregate?period=7d",
+      "body": "{\"query\":{\"period\":\"7d\",\"from\":\"2026-11-05\",\"to\":\"2026-11-11\",\"interval\":\"day\",\"timezone\":\"Asia/Shanghai\",\"filters\":[]},\"current\":{\"visitors\":1842,\"visits\":2356,\"pageviews\":6184,\"views_per_visit\":2.62,\"bounce_rate\":32.4,\"visit_duration\":146},\"previous\":{\"visitors\":1540,\"visits\":1986,\"pageviews\":4804,\"views_per_visit\":2.42,\"bounce_rate\":38.1,\"visit_duration\":123}}"
+    },
+    {
+      "url": "http://127.0.0.1:8080/api/v1/sites/1/timeseries?period=7d",
+      "body": "{\"query\":{\"period\":\"7d\",\"from\":\"2026-11-05\",\"to\":\"2026-11-11\",\"interval\":\"day\",\"timezone\":\"Asia/Shanghai\",\"filters\":[]},\"points\":[{\"date\":\"2026-11-05T00:00:00\",\"visitors\":206,\"visits\":264,\"pageviews\":690,\"views_per_visit\":2.62,\"bounce_rate\":32.4,\"visit_duration\":146},{\"date\":\"2026-11-06T00:00:00\",\"visitors\":251,\"visits\":321,\"pageviews\":841,\"views_per_visit\":2.62,\"bounce_rate\":32.4,\"visit_duration\":146},{\"date\":\"2026-11-07T00:00:00\",\"visitors\":238,\"visits\":305,\"pageviews\":797,\"views_per_visit\":2.62,\"bounce_rate\":32.4,\"visit_duration\":146},{\"date\":\"2026-11-08T00:00:00\",\"visitors\":304,\"visits\":389,\"pageviews\":1018,\"views_per_visit\":2.62,\"bounce_rate\":32.4,\"visit_duration\":146},{\"date\":\"2026-11-09T00:00:00\",\"visitors\":276,\"visits\":353,\"pageviews\":925,\"views_per_visit\":2.62,\"bounce_rate\":32.4,\"visit_duration\":146},{\"date\":\"2026-11-10T00:00:00\",\"visitors\":315,\"visits\":403,\"pageviews\":1055,\"views_per_visit\":2.62,\"bounce_rate\":32.4,\"visit_duration\":146},{\"date\":\"2026-11-11T00:00:00\",\"visitors\":252,\"visits\":323,\"pageviews\":844,\"views_per_visit\":2.62,\"bounce_rate\":32.4,\"visit_duration\":146}]}"
+    },
+    {
+      "url": "http://127.0.0.1:8080/api/v1/sites/1/breakdown/source?period=7d&limit=5",
+      "body": "{\"total_visitors\":1842,\"rows\":[{\"value\":\"Google\",\"visitors\":824,\"count\":2604},{\"value\":\"GitHub\",\"visitors\":416,\"count\":1430},{\"value\":\"\",\"visitors\":312,\"count\":1058},{\"value\":\"Bing\",\"visitors\":168,\"count\":573},{\"value\":\"DuckDuckGo\",\"visitors\":122,\"count\":519}]}"
+    },
+    {
+      "url": "http://127.0.0.1:8080/api/v1/sites/1/realtime",
+      "body": "{\"visitors\":12}"
+    }
+  ]
+}
