@@ -1,8 +1,8 @@
 <bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.18.0" category="social" icon="tv"
+     version="1.19.0" category="social" icon="tv"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
-     refresh="1h" material="solid">
+     refresh="1h" material="glass">
   <permissions>
     <network origin="https://api.bilibili.com" />
     <network origin="https://member.bilibili.com" />
@@ -1038,8 +1038,7 @@ function sectionError(key) {
     note(times[key] ? "上次成功：" + stamp(times[key]) : "此项尚无可用数据")) : null;
 }
 const ACCOUNT_SURFACE = {
-  background: "surfaceHover",
-  linearGradient: { angle: 90, stops: [{ at: 0, color: "surfaceHover" }, { at: 1, color: "surface" }] },
+  material: { type: "glass", style: "regular", tint: "surface", interactive: false },
   border: [0.5, "border"],
   shadow: { x: 0, y: 1, blur: 3, spread: 0, color: "#00000010" },
 };
@@ -1423,7 +1422,7 @@ function panel(env) {
     : login.phase === "error" || login.phase === "expired" || (credential && inputError) ? 240 : 208;
   return h("Column", { preferredWidth: 320, preferredHeight: connected ? connectedHeight : loginHeight, safeArea: true,
     width: "100%", height: "100%", maxWidth: 320, minHeight: 0, minWidth: 0,
-    padding, gap: accountPage ? 8 : 12, radius: 24, background: "surface", textColor: "text", fontSize: 13,
+    padding, gap: accountPage ? 8 : 12, radius: 16, textColor: "text", fontSize: 13,
     contextMenu, shortcuts: { "CmdOrCtrl+R": () => requestRefresh() } },
     connected ? IdentityHeader() : h("Row", { gap: 12, alignItems: "center", width: "100%" },
       h("Box", { width: 40, height: 40, radius: 20, background: "accentSubtle", alignItems: "center", justify: "center" },
