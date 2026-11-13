@@ -1,5 +1,5 @@
-<bar protocol-version="0" id="bilibili-account" title="哔哩哔哩账户"
-     version="1.17.1" category="social" icon="tv"
+<bar protocol-version="0" id="bilibili-account" title="BiliBili"
+     version="1.17.2" category="social" icon="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48cmVjdCB4PSIxIiB5PSIxIiB3aWR0aD0iMzAiIGhlaWdodD0iMzAiIHJ4PSI4IiBmaWxsPSIjRkI3Mjk5Ii8+PHBhdGggZD0ibTEwIDYgNSA1bTctNS01IDUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0ZGRkZGRiIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxyZWN0IHg9IjUiIHk9IjEwIiB3aWR0aD0iMjIiIGhlaWdodD0iMTYiIHJ4PSI0IiBmaWxsPSIjRkZGRkZGIi8+PHBhdGggZD0iTTExIDE1djRtMTAtNHY0bS04IDMgMy0xIDMgMSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkI3Mjk5IiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+"
      description="自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。"
      license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
      refresh="1h" material="solid">
@@ -133,6 +133,7 @@ const IM = "https://api.vc.bilibili.com";
 const PASSPORT = "https://passport.bilibili.com";
 // Official Bilibili header level SVG fills, verified 2026-11-09.
 const LEVEL_COLORS = ["#C0C0C0", "#C0C0C0", "#8BD29B", "#7BCDEF", "#FEBB8B", "#EE672A", "#FF0000"];
+const APP_ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48cmVjdCB4PSIxIiB5PSIxIiB3aWR0aD0iMzAiIGhlaWdodD0iMzAiIHJ4PSI4IiBmaWxsPSIjRkI3Mjk5Ii8+PHBhdGggZD0ibTEwIDYgNSA1bTctNS01IDUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0ZGRkZGRiIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxyZWN0IHg9IjUiIHk9IjEwIiB3aWR0aD0iMjIiIGhlaWdodD0iMTYiIHJ4PSI0IiBmaWxsPSIjRkZGRkZGIi8+PHBhdGggZD0iTTExIDE1djRtMTAtNHY0bS04IDMgMy0xIDMgMSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkI3Mjk5IiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+";
 const MARK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m7 2 3 4m7-4-3 4"/><rect x="3" y="6" width="18" height="15" rx="4"/><path d="M8 11v3m8-3v3m-7 3h6"/></svg>';
 const h = (type, props = {}, ...children) => ({ type, props, children: children.flat().filter(v => v != null && v !== false) });
 const text = (value, props = {}) => h("Text", { text: String(value), ...props });
@@ -1455,7 +1456,7 @@ export default {
     const daily = followerDaily?.date === yesterdayDate() ? followerDaily : null;
     const pages = pageMenu();
     const title = features.followers && followers ? "粉丝 " + comma(followers.count) + (daily ? " (昨日 " + signed(daily.net) + ")" : "") : account?.name || "哔哩哔哩";
-    return { tray: { icon: "data:image/svg+xml," + encodeURIComponent(MARK), iconTemplate: true, title,
+    return { tray: { icon: APP_ICON, iconTemplate: false, title,
       tooltip: account ? account.name + (features.identity ? " · UID " + account.uid : "") : "连接自己的 B 站账户",
       error: inputError || Object.values(errors).join("；"),
       menu: [{ label: "刷新", disabled: loading || !!inputError, onClick: () => requestRefresh() },

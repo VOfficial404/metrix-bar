@@ -1,0 +1,278 @@
+<bar protocol-version="0" id="asf" title="ArchiSteamFarm"
+     version="1.1.7" category="gaming" icon="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48cGF0aCBkPSJNMTYgMSAzMSAxNiAxNiAzMSAxIDE2WiIgZmlsbD0iIzE5MkU0NiIvPjxwYXRoIGQ9Im0xNiAxIDE1IDE1LTE1IDE1IDktMTVaIiBmaWxsPSIjMjk0NTc0Ii8+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkZGRkZGIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj48cGF0aCBkPSJNMTYgNnY0bS00LTJ2NG04LTR2NE0xNiAxN3YxMCIvPjwvZz48ZyBmaWxsPSIjRkZGRkZGIj48cGF0aCBkPSJNMTYgMTBjLTQgMy00IDYgMCA4IDQtMiA0LTUgMC04WiIvPjxwYXRoIGQ9Ik0xNiAyMmMtNSAwLTctMy03LTcgNCAxIDcgMyA3IDdabTAgMGM1IDAgNy0zIDctNy00IDEtNyAzLTcgN1oiLz48cGF0aCBkPSJNMTYgMjdjLTQuNSAwLTYtMi41LTYtNiAzLjUgMSA2IDIuNSA2IDZabTAgMGM0LjUgMCA2LTIuNSA2LTYtMy41IDEtNiAyLjUtNiA2WiIvPjwvZz48L3N2Zz4="
+     description="查看 ArchiSteamFarm 账号、当前挂卡游戏与剩余卡牌，启动、停止、暂停和恢复账号。"
+     license="AGPL-3.0-only" homepage="https://github.com/VOfficial404/metrix-bar"
+     refresh="1m" material="solid">
+  <permissions>
+    <network origin="{{ inputs.base_url }}" />
+    <network origin="https://avatars.steamstatic.com" />
+    <network origin="https://store.steampowered.com" />
+  </permissions>
+  <inputs>
+    <input name="base_url" type="string" label="连接 · ASF IPC 地址" default="http://127.0.0.1:1242" required="true"
+           help="填写 ASF 服务源地址，不带 /Api 路径。本机支持 HTTP，远程服务使用 HTTPS。" />
+    <input name="ipc_key" type="secret" label="连接 · IPC 密码"
+           help="填写 ASF 的 IPCPassword；未启用密码的本机服务可留空。密码保存在系统密钥库。" />
+  </inputs>
+  <docs><![CDATA[先运行 ArchiSteamFarm 并启用 IPC，在 ASF 中配置 Steam 账号及完成登录。在本看板设置填写 IPC 地址和可选的 IPCPassword。默认每分钟刷新，也可手动刷新。启动／停止控制账号运行；暂停／恢复仅控制挂卡，暂停持续到手动恢复或 ASF 重启。看板不会安装 ASF、保存 Steam 密码或处理 Steam Guard。]]></docs>
+  <script apis="shell"><![CDATA[
+const APP_ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48cGF0aCBkPSJNMTYgMSAzMSAxNiAxNiAzMSAxIDE2WiIgZmlsbD0iIzE5MkU0NiIvPjxwYXRoIGQ9Im0xNiAxIDE1IDE1LTE1IDE1IDktMTVaIiBmaWxsPSIjMjk0NTc0Ii8+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkZGRkZGIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj48cGF0aCBkPSJNMTYgNnY0bS00LTJ2NG04LTR2NE0xNiAxN3YxMCIvPjwvZz48ZyBmaWxsPSIjRkZGRkZGIj48cGF0aCBkPSJNMTYgMTBjLTQgMy00IDYgMCA4IDQtMiA0LTUgMC04WiIvPjxwYXRoIGQ9Ik0xNiAyMmMtNSAwLTctMy03LTcgNCAxIDcgMyA3IDdabTAgMGM1IDAgNy0zIDctNy00IDEtNyAzLTcgN1oiLz48cGF0aCBkPSJNMTYgMjdjLTQuNSAwLTYtMi41LTYtNiAzLjUgMSA2IDIuNSA2IDZabTAgMGM0LjUgMCA2LTIuNSA2LTYtMy41IDEtNiAyLjUtNiA2WiIvPjwvZz48L3N2Zz4=";
+const h = (type, props = {}, ...children) => ({ type, props, children: children.flat().filter(x => x != null && x !== false) });
+const text = (value, props = {}) => h("Text", { text: String(value), fontSize: 13, ...props });
+const note = (value, props = {}) => text(value, { fontSize: 11, textColor: "textMuted", ...props });
+const ACTIONS = { Start: "启动", Stop: "停止", Pause: "暂停挂卡", Resume: "恢复挂卡" };
+let config = null, setupError = "", bots = null, loadedAt = 0, error = "", result = "";
+let generation = 0, controller = null, inflight = null, pending = "", stopped = false;
+const gameNames = new Map();
+class RequestError extends Error {}
+function endpoint(value) {
+  const u = new URL(String(value).trim());
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname))) throw new Error();
+  if (u.href.includes("@") || u.search || u.hash || u.pathname !== "/") throw new Error();
+  return u.origin;
+}
+function cancel() {
+  generation++;
+  controller?.abort(); controller = null; inflight = null; pending = "";
+}
+function sync(env) {
+  let next = null, problem = "", key = "";
+  try { key = $metrix.secret("ipc_key") || ""; } catch { /* Optional when local ASF has no IPCPassword. */ }
+  try { next = { base: endpoint(env.inputs.base_url), key }; }
+  catch { problem = "请填写有效的 ASF 服务源地址（远程 HTTPS 或本机 HTTP），不带路径、查询或 URL 账号信息。"; }
+  if (next?.base === config?.base && next?.key === config?.key && problem === setupError) return;
+  cancel(); config = next; setupError = problem;
+  gameNames.clear();
+  bots = null; loadedAt = 0; error = ""; result = "";
+}
+const integer = value => Number.isSafeInteger(value) && value >= 0;
+function games(raw) {
+  if (!Array.isArray(raw)) return null;
+  return raw.map(g => {
+    if (!g || !integer(g.AppID) || typeof g.GameName !== "string" || !integer(g.CardsRemaining)) throw new RequestError("ASF 游戏数据格式无效。");
+    return { id: g.AppID, name: g.GameName, cards: g.CardsRemaining };
+  });
+}
+function accounts(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new RequestError("ASF 账号响应格式无效。");
+  return Object.entries(raw).map(([name, b]) => {
+    if (!b || b.BotName !== name || typeof b.KeepRunning !== "boolean" || typeof b.IsConnectedAndLoggedOn !== "boolean") throw new RequestError("ASF 账号状态格式无效。");
+    const f = b.CardsFarmer;
+    if (!f || typeof f.Paused !== "boolean" || typeof f.NowFarming !== "boolean") throw new RequestError("ASF 挂卡状态格式无效。");
+    const available = b.KeepRunning && b.IsConnectedAndLoggedOn;
+    const remaining = available ? games(f.GamesToFarm) : null, current = available ? games(f.CurrentGamesFarming) : null;
+    const idleGames = Array.isArray(b.BotConfig?.GamesPlayedWhileIdle)
+      ? b.BotConfig.GamesPlayedWhileIdle.filter(id => integer(id) && id > 0) : [];
+    const idleLabel = typeof b.BotConfig?.CustomGamePlayedWhileIdle === "string" ? b.BotConfig.CustomGamePlayedWhileIdle : "";
+    const avatar = typeof b.AvatarHash === "string" && /^[a-f0-9]{40}$/i.test(b.AvatarHash) && !/^0+$/.test(b.AvatarHash)
+      ? "https://avatars.steamstatic.com/" + b.AvatarHash.toLowerCase() + "_medium.jpg" : "";
+    return { name, nickname: typeof b.Nickname === "string" ? b.Nickname : "", avatar, idleGames, idleLabel, running: b.KeepRunning,
+      online: b.IsConnectedAndLoggedOn, playing: b.IsPlayingPossible, paused: f.Paused, farming: f.NowFarming,
+      current, games: remaining?.length ?? null, cards: remaining ? remaining.reduce((sum, g) => sum + g.cards, 0) : null };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+async function resolveGameNames(list, signal, version) {
+  const ids = [...new Set(list.flatMap(bot => bot.idleGames))].filter(id => !gameNames.has(id));
+  for (let offset = 0; offset < ids.length && !signal.aborted && version === generation; offset += 4) {
+    await Promise.all(ids.slice(offset, offset + 4).map(async id => {
+      try {
+        const response = await fetch("https://store.steampowered.com/api/appdetails?appids=" + id + "&filters=basic&l=schinese",
+          { signal, redirect: "error", headers: { Accept: "application/json" } });
+        if (!response.ok) return;
+        const app = (await response.json())?.[String(id)];
+        if (version !== generation || signal.aborted || app?.success !== true || app.data?.steam_appid !== id) return;
+        const name = app.data.name;
+        if (typeof name === "string" && name.trim()) gameNames.set(id, name.trim());
+      } catch { /* Public metadata is optional; retain App ID when unavailable. */ }
+    }));
+    if (version === generation) $metrix.invalidate();
+  }
+}
+const idleGameName = id => gameNames.get(id) || "App " + id;
+async function request(connection, path, signal, action) {
+  const headers = { Accept: "application/json" };
+  if (connection.key) headers.Authentication = connection.key;
+  const options = { headers, signal, redirect: "error", method: action ? "POST" : "GET" };
+  if (action === "Pause") {
+    headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify({ Permanent: true, ResumeInSeconds: 0 });
+  }
+  const response = await fetch(connection.base + "/Api/Bot/" + path, options);
+  if ([401, 403].includes(response.status)) throw new RequestError("ASF 拒绝访问，请检查 IPC 密码和访问配置。");
+  if (response.status === 429) throw new RequestError("ASF 暂时限制请求，请稍后刷新。");
+  if (!response.ok) throw new RequestError("ASF 请求失败（HTTP " + response.status + "）。");
+  let body;
+  try { body = await response.json(); } catch { throw new RequestError("ASF 返回了无效的 JSON，请检查 IPC 地址。"); }
+  if (body?.Success !== true) throw new RequestError(action ? "ASF 未确认操作成功，请在 ASF 管理页查看原因。" : "ASF 未能返回账号，请检查服务及账号配置。");
+  return body.Result;
+}
+const safeError = e => e instanceof RequestError ? e.message : "无法连接 ASF 或请求超时，请检查服务和 IPC 地址。";
+function refresh() {
+  if (!config || stopped) return Promise.resolve();
+  if (inflight) return inflight;
+  const version = generation, connection = config, abort = new AbortController();
+  controller = abort;
+  const timer = setTimeout(() => abort.abort(), 10000);
+  inflight = (async () => {
+    try {
+      const next = accounts(await request(connection, "ASF", abort.signal));
+      if (version !== generation) return;
+      bots = next; loadedAt = Date.now(); error = "";
+      $metrix.invalidate();
+      await resolveGameNames(next, abort.signal, version);
+    } catch (e) { if (version === generation) error = safeError(e); }
+    finally {
+      clearTimeout(timer);
+      if (version === generation) { inflight = null; controller = null; $metrix.invalidate(); }
+    }
+  })();
+  $metrix.invalidate();
+  return inflight;
+}
+// ASF's path parameter also accepts selectors; never let one row target several bots.
+const exactName = name => name && name.toUpperCase() !== "ASF" && !name.startsWith("@") && !/^r!/i.test(name) && !name.includes(",") && !name.includes("..");
+async function control(name, action, expectedGeneration) {
+  if (!config || stopped || pending || error || expectedGeneration !== generation || !Object.hasOwn(ACTIONS, action) || !exactName(name)) return;
+  const bot = bots?.find(b => b.name === name);
+  if (!bot || (action === "Start" ? bot.running : action === "Stop" ? !bot.running : !bot.online || (action === "Pause" ? bot.paused : !bot.paused))) return;
+  cancel();
+  const version = generation, connection = config, abort = new AbortController();
+  controller = abort; pending = name; result = "";
+  const timer = setTimeout(() => abort.abort(), 12000);
+  const operation = (async () => {
+    let accepted = false;
+    try {
+      await request(connection, encodeURIComponent(name) + "/" + action, abort.signal, action);
+      accepted = true;
+      if (version !== generation) return;
+      result = name + "：ASF 已接受“" + ACTIONS[action] + "”。";
+      const next = accounts(await request(connection, "ASF", abort.signal));
+      if (version !== generation) return;
+      bots = next; loadedAt = Date.now(); error = "";
+      $metrix.invalidate();
+      await resolveGameNames(next, abort.signal, version);
+    } catch (e) {
+      if (version === generation) error = (accepted ? "操作已接受，但状态刷新失败。" : "操作未确认，请刷新核对状态后再操作。") + safeError(e);
+    } finally {
+      clearTimeout(timer);
+      if (version === generation) { pending = ""; controller = null; inflight = null; $metrix.invalidate(); }
+    }
+  })();
+  inflight = operation; $metrix.invalidate();
+  await operation;
+}
+const farmingNow = bot => bot.running && bot.online && bot.playing !== false && bot.farming && !bot.paused;
+function currentGamesText(bot) {
+  if (!bot.running || !bot.online) return "未连接 Steam，当前游戏与卡牌队列未知";
+  if (bot.paused) return "卡牌挂卡已暂停";
+  if (bot.playing === false) return "游戏被占用，无法挂卡";
+  if (farmingNow(bot)) return bot.current?.length ? bot.current.map(g => g.name || "App " + g.id).join("、") : "正在挂卡，游戏列表暂不可用";
+  return "当前未进行卡牌挂卡";
+}
+function status(bot) {
+  if (!bot.running) return ["已停止", "textMuted", "#8995A2"];
+  if (!bot.online) return ["连接中／等待登录", "warning", "#E5B45A"];
+  if (bot.paused) return ["挂卡已暂停", "warning", "#E5B45A"];
+  if (bot.playing === false) return ["游戏占用", "warning", "#E5B45A"];
+  return bot.farming ? ["正在挂卡", "success", "#A4D007"] : ["在线待机", "textMuted", "#66C0F4"];
+}
+function botRow(bot) {
+  const [label, color, light] = status(bot), version = generation;
+  const unavailable = Boolean(inflight || error || !exactName(bot.name));
+  const button = action => h("Button", { key: "action-" + bot.name + "-" + action, text: ACTIONS[action],
+    fontSize: 11, height: 28, paddingX: 10,
+    disabled: unavailable || ((action === "Pause" || action === "Resume") && !bot.online),
+    onClick: () => control(bot.name, action, version) });
+  return h("Column", { key: "bot-" + bot.name, gap: 10, padding: [12, 14], fillWidth: true, minWidth: 0 },
+    h("Row", { gap: 10, alignItems: "center", fillWidth: true },
+      h("Avatar", { key: "avatar-" + bot.name, name: bot.nickname || bot.name, src: bot.avatar, width: 36, height: 36, radius: 8, fit: "cover", shrink: 0 }),
+      h("Column", { grow: 1, minWidth: 0, gap: 4 },
+        text(bot.nickname || bot.name, { fontSize: 14, bold: true, singleLine: true, fillWidth: true,
+          tooltip: bot.nickname ? bot.nickname + " · " + bot.name : bot.name }),
+        h("Row", { gap: 8, fillWidth: true, alignItems: "center" },
+          note(bot.name, { grow: 1, minWidth: 0, singleLine: true, tooltip: bot.name }),
+          h("Row", { gap: 4, alignItems: "center", shrink: 0, tooltip: label },
+            h("Box", { key: "status-light-" + bot.name, width: 6, height: 6, radius: 3, background: light, shrink: 0, label }),
+            text(label, { key: "status-" + bot.name, fontSize: 11, textColor: color }))))),
+    h("Column", { gap: 6, fillWidth: true, minWidth: 0 },
+      h("Column", { gap: 4, padding: [8, 10], background: "background", radius: 6, fillWidth: true, minWidth: 0,
+        borderStartWidth: 2, borderColor: farmingNow(bot) ? "success" : "border" },
+        note("卡牌挂卡", { fontSize: 10 }),
+        text(currentGamesText(bot), { key: "games-" + bot.name, fontSize: 12, bold: farmingNow(bot),
+          fillWidth: true, minWidth: 0, maxLines: 2, tooltip: currentGamesText(bot) })),
+      bot.idleGames.length || bot.idleLabel ? h("Row", { gap: 8, fillWidth: true, alignItems: "start", paddingX: 2 },
+        note("空闲配置", { width: 48, shrink: 0, tooltip: "ASF 未提供空闲游戏的实际运行确认" }),
+        h("Column", { gap: 2, grow: 1, minWidth: 0 },
+          note(bot.idleGames.length ? bot.idleGames.map(idleGameName).join("、") : "自定义状态",
+            { key: "idle-" + bot.name, fillWidth: true, maxLines: 2,
+              tooltip: bot.idleGames.map(id => idleGameName(id) + " · App " + id).join("\n") }),
+          bot.idleLabel ? note("显示为 " + bot.idleLabel, { singleLine: true, fillWidth: true, tooltip: bot.idleLabel }) : null)) : null),
+    h("Row", { gap: 8, alignItems: "center", fillWidth: true },
+      h("Column", { gap: 2, grow: 1, minWidth: 0 }, note("剩余卡牌 " + (bot.cards ?? "—")), note("剩余游戏 " + (bot.games ?? "—"))),
+      button(bot.running ? "Stop" : "Start"), button(bot.paused ? "Resume" : "Pause")),
+    pending === bot.name ? note("正在处理…") : null,
+    !exactName(bot.name) ? note("此账号名称包含 ASF 选择器语法，请在 ASF 管理页操作。") : null);
+}
+function panelHeight() {
+  if (!bots?.length) return setupError || error ? 208 : 204;
+  const rows = bots.reduce((height, bot) => height + 156 + (currentGamesText(bot).length > 26 ? 24 : 0)
+    + (bot.idleGames.length || bot.idleLabel ? 22 : 0)
+    + (bot.idleGames.map(idleGameName).join("、").length > 24 ? 16 : 0)
+    + (bot.idleLabel ? 16 : 0) + (!exactName(bot.name) ? 36 : 0), 0);
+  return Math.min(680, 132 + rows + (error ? 72 : 0) + (result ? 32 : 0) + (pending ? 20 : 0));
+}
+function panel() {
+  const online = bots?.filter(b => b.online).length;
+  const farming = bots?.filter(farmingNow).length;
+  const onlineBots = bots?.filter(b => b.running && b.online) || [];
+  const cards = onlineBots.length && onlineBots.every(b => b.cards !== null) ? onlineBots.reduce((sum, b) => sum + b.cards, 0) : "—";
+  const metric = (key, label, value) => h("Row", { gap: 4, alignItems: "center" },
+    note(label), text(value, { key, fontSize: 11, fontWeight: 500 }));
+  return h("Column", { preferredWidth: 360, preferredHeight: panelHeight(),
+    safeArea: true, fill: true, minWidth: 0, minHeight: 0, shortcuts: { "CmdOrCtrl+R": () => refresh() } },
+    h("Row", { padding: [8, 14], gap: 8, alignItems: "center", fillWidth: true },
+      h("Image", { src: APP_ICON, width: 22, height: 22, shrink: 0, label: "ASF" }),
+      text("ASF 挂卡", { fontSize: 13, bold: true }), note("v1.1.7", { key: "version", grow: 1, fontSize: 10 }),
+      h("Button", { key: "refresh", text: "↻", label: "刷新", tooltip: inflight ? "正在刷新" : "刷新（Ctrl/Cmd+R）",
+        fontSize: 18, width: 28, height: 26, padding: 0, shrink: 0,
+        disabled: !config || Boolean(inflight), onClick: () => refresh() }),
+      h("Button", { key: "manage", text: "控制台", label: "打开 ASF 控制台", tooltip: "打开 ASF Web 控制台",
+        fontSize: 11, height: 26, paddingX: 8, shrink: 0,
+        disabled: !config, onClick: () => config && $metrix.openURL(config.base + "/") })),
+    bots?.length ? h("Row", { padding: [0, 14, 8, 14], gap: 14, fillWidth: true, alignItems: "center" },
+      metric("online-accounts", "在线", online + "/" + bots.length), metric("farming-accounts", "挂卡", farming),
+      metric("online-cards", "在线队列卡牌", cards)) : null,
+    h("Divider"),
+    h("Scroll", { grow: 1, minHeight: 0, fillWidth: true }, h("Column", { fillWidth: true },
+      setupError || error ? h("Column", { key: "error", gap: 4, padding: 14, fillWidth: true },
+        text(setupError ? "连接未就绪" : bots ? "刷新失败，保留上次数据" : "无法读取账号", { fontSize: 12, bold: true, textColor: "danger" }),
+        note(setupError || error, { maxLines: 4, tooltip: setupError || error })) : null,
+      result ? note(result, { key: "result", padding: [8, 14] }) : null,
+      bots === null ? !setupError && !error ? h("Column", { gap: 6, padding: [20, 14], fillWidth: true },
+        text(inflight ? "正在读取账号" : "连接 ASF", { fontSize: 14, bold: true }),
+        note(inflight ? "正在同步账号状态与卡牌队列…" : "在设置中填写 ASF IPC 地址，然后点击刷新。", { maxLines: 2 })) : null :
+        bots.length ? bots.flatMap((b, i) => [i ? h("Divider") : null, botRow(b)]) :
+          h("Column", { key: "empty", gap: 6, padding: [20, 14], fillWidth: true }, text("还没有账号", { fontSize: 14, bold: true }),
+            note("在管理页添加账号并完成 Steam 登录。", { maxLines: 2 })))),
+    h("Divider"), h("Column", { gap: 4, padding: [8, 14], fillWidth: true, minWidth: 0 },
+      note((error && loadedAt ? "数据已过期 · " : "") + (loadedAt ? "更新于 " + new Date(loadedAt).toTimeString().slice(0, 5) : "尚未更新") + " · 每分钟刷新", { fontSize: 10, singleLine: true }),
+      note("空闲游戏仅表示配置", { fontSize: 10, singleLine: true })));
+}
+export default {
+  async scheduled(env) { sync(env); await refresh(); },
+  render(env) {
+    sync(env);
+    const count = bots?.filter(farmingNow).length;
+    return { tray: { title: count == null ? "ASF" : "ASF " + count, icon: APP_ICON, iconTemplate: false, error: setupError || error,
+      tooltip: count == null ? "ArchiSteamFarm" : count + " 个账号正在进行卡牌挂卡（不含空闲游戏配置）",
+      menu: [{ label: "刷新", onClick: () => refresh(), disabled: !config || Boolean(inflight) }] }, panel: panel() };
+  },
+  event(name, payload) {
+    if (name !== "lifecycle") return;
+    if (payload?.type === "stop") { stopped = true; cancel(); }
+    if (payload?.type === "start") stopped = false;
+    if (payload?.type === "expand" && Date.now() - loadedAt >= 60000) return refresh();
+  },
+};
+  ]]></script>
+</bar>

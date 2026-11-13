@@ -1,0 +1,122 @@
+{
+  "fixture": {
+    "now": "2026-11-12T08:30:00Z",
+    "secrets": {
+      "ipc_key": "asf-fixture-only"
+    },
+    "http": [
+      {
+        "url": "https://store.steampowered.com/api/appdetails?appids=480&filters=basic&l=schinese",
+        "body": "{\"480\":{\"success\":false}}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/ASF",
+        "times": 1,
+        "body": "{\"Success\":true,\"Result\":{\"alpha\":{\"BotName\":\"alpha\",\"Nickname\":\"主账号\",\"KeepRunning\":true,\"IsConnectedAndLoggedOn\":true,\"IsPlayingPossible\":true,\"CardsFarmer\":{\"Paused\":false,\"NowFarming\":true,\"CurrentGamesFarming\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}],\"GamesToFarm\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}]}}}}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/ASF",
+        "times": 1,
+        "body": "{\"Success\":true,\"Result\":{\"alpha\":{\"BotName\":\"alpha\",\"Nickname\":\"主账号\",\"KeepRunning\":true,\"IsConnectedAndLoggedOn\":true,\"IsPlayingPossible\":true,\"CardsFarmer\":{\"Paused\":true,\"NowFarming\":false,\"CurrentGamesFarming\":[],\"GamesToFarm\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}]}}}}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/ASF",
+        "times": 1,
+        "body": "{\"Success\":true,\"Result\":{\"alpha\":{\"BotName\":\"alpha\",\"Nickname\":\"主账号\",\"KeepRunning\":true,\"IsConnectedAndLoggedOn\":true,\"IsPlayingPossible\":true,\"CardsFarmer\":{\"Paused\":false,\"NowFarming\":true,\"CurrentGamesFarming\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}],\"GamesToFarm\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}]}}}}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/ASF",
+        "times": 1,
+        "body": "{\"Success\":true,\"Result\":{\"alpha\":{\"BotName\":\"alpha\",\"Nickname\":\"主账号\",\"KeepRunning\":false,\"IsConnectedAndLoggedOn\":false,\"IsPlayingPossible\":true,\"CardsFarmer\":{\"Paused\":false,\"NowFarming\":true,\"CurrentGamesFarming\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}],\"GamesToFarm\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}]}}}}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/ASF",
+        "times": 1,
+        "body": "{\"Success\":true,\"Result\":{\"alpha\":{\"BotName\":\"alpha\",\"Nickname\":\"主账号\",\"KeepRunning\":true,\"IsConnectedAndLoggedOn\":false,\"IsPlayingPossible\":true,\"CardsFarmer\":{\"Paused\":false,\"NowFarming\":true,\"CurrentGamesFarming\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}],\"GamesToFarm\":[{\"AppID\":480,\"GameName\":\"Spacewar\",\"CardsRemaining\":4}]}}}}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/alpha/Pause",
+        "method": "POST",
+        "request_body": "{\"Permanent\":true,\"ResumeInSeconds\":0}",
+        "body": "{\"Success\":true}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/alpha/Resume",
+        "method": "POST",
+        "body": "{\"Success\":true}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/alpha/Stop",
+        "method": "POST",
+        "body": "{\"Success\":true}"
+      },
+      {
+        "url": "http://127.0.0.1:1242/Api/Bot/alpha/Start",
+        "method": "POST",
+        "body": "{\"Success\":true}"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "action": "invoke",
+      "target": {
+        "key": "action-alpha-Pause"
+      },
+      "handler": "onClick",
+      "expect": [
+        {
+          "target": {
+            "key": "status-alpha"
+          },
+          "text": "挂卡已暂停"
+        }
+      ]
+    },
+    {
+      "action": "invoke",
+      "target": {
+        "key": "action-alpha-Resume"
+      },
+      "handler": "onClick",
+      "expect": [
+        {
+          "target": {
+            "key": "status-alpha"
+          },
+          "text": "正在挂卡"
+        }
+      ]
+    },
+    {
+      "action": "invoke",
+      "target": {
+        "key": "action-alpha-Stop"
+      },
+      "handler": "onClick",
+      "expect": [
+        {
+          "target": {
+            "key": "status-alpha"
+          },
+          "text": "已停止"
+        }
+      ]
+    },
+    {
+      "action": "invoke",
+      "target": {
+        "key": "action-alpha-Start"
+      },
+      "handler": "onClick",
+      "expect": [
+        {
+          "target": {
+            "key": "status-alpha"
+          },
+          "text": "连接中／等待登录"
+        }
+      ]
+    }
+  ]
+}

@@ -5,10 +5,29 @@
   "name": "VOfficial404",
   "dashboards": [
     {
-      "id": "bilibili-account",
-      "name": "哔哩哔哩账户",
+      "id": "asf",
+      "name": "ArchiSteamFarm",
       "protocol_version": "0",
-      "version": "1.17.1",
+      "version": "1.1.9",
+      "category": "gaming",
+      "placements": [
+        "menubar"
+      ],
+      "open_mode": "flyout",
+      "window_style": "standard",
+      "description": "查看 ArchiSteamFarm 账号、当前挂卡游戏与剩余卡牌，启动、停止、暂停和恢复账号。",
+      "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48cGF0aCBkPSJNMTYgMSAzMSAxNiAxNiAzMSAxIDE2WiIgZmlsbD0iIzE5MkU0NiIvPjxwYXRoIGQ9Im0xNiAxIDE1IDE1LTE1IDE1IDktMTVaIiBmaWxsPSIjMjk0NTc0Ii8+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkZGRkZGIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj48cGF0aCBkPSJNMTYgNnY0bS00LTJ2NG04LTR2NE0xNiAxN3YxMCIvPjwvZz48ZyBmaWxsPSIjRkZGRkZGIj48cGF0aCBkPSJNMTYgMTBjLTQgMy00IDYgMCA4IDQtMiA0LTUgMC04WiIvPjxwYXRoIGQ9Ik0xNiAyMmMtNSAwLTctMy03LTcgNCAxIDcgMyA3IDdabTAgMGM1IDAgNy0zIDctNy00IDEtNyAzLTcgN1oiLz48cGF0aCBkPSJNMTYgMjdjLTQuNSAwLTYtMi41LTYtNiAzLjUgMSA2IDIuNSA2IDZabTAgMGM0LjUgMCA2LTIuNSA2LTYtMy41IDEtNiAyLjUtNiA2WiIvPjwvZz48L3N2Zz4=",
+      "license": "AGPL-3.0-only",
+      "homepage": "https://github.com/VOfficial404/metrix-bar",
+      "docs": "先运行 ArchiSteamFarm 并启用 IPC，在 ASF 中配置 Steam 账号及完成登录。在本看板设置填写 IPC 地址和可选的 IPCPassword。默认每分钟刷新，也可手动刷新。启动／停止控制账号运行；暂停／恢复仅控制挂卡，暂停持续到手动恢复或 ASF 重启。看板不会安装 ASF、保存 Steam 密码或处理 Steam Guard。",
+      "sha256": "910e4a62885c40616f5ce6fd6aa4013f5c39d8a40fe28170e9fb53e26d8b1192",
+      "file": "asf/asf.910e4a62885c40616f5ce6fd6aa4013f5c39d8a40fe28170e9fb53e26d8b1192.bar"
+    },
+    {
+      "id": "bilibili-account",
+      "name": "BiliBili",
+      "protocol_version": "0",
+      "version": "1.17.2",
       "category": "social",
       "placements": [
         "menubar"
@@ -16,12 +35,12 @@
       "open_mode": "flyout",
       "window_style": "standard",
       "description": "自定义 B 站菜单顺序与开关，按用户筛选动态，查看账户、视频统计和私信会话。",
-      "icon": "tv",
+      "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48cmVjdCB4PSIxIiB5PSIxIiB3aWR0aD0iMzAiIGhlaWdodD0iMzAiIHJ4PSI4IiBmaWxsPSIjRkI3Mjk5Ii8+PHBhdGggZD0ibTEwIDYgNSA1bTctNS01IDUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI0ZGRkZGRiIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxyZWN0IHg9IjUiIHk9IjEwIiB3aWR0aD0iMjIiIGhlaWdodD0iMTYiIHJ4PSI0IiBmaWxsPSIjRkZGRkZGIi8+PHBhdGggZD0iTTExIDE1djRtMTAtNHY0bS04IDMgMy0xIDMgMSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkI3Mjk5IiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+",
       "license": "AGPL-3.0-only",
       "homepage": "https://github.com/VOfficial404/metrix-bar",
       "docs": "打开看板扫码登录，在设置中选择需要的功能。详细说明：https://github.com/VOfficial404/metrix-bar/tree/main/dashboards/bilibili#readme",
-      "sha256": "a17488a0d58947e72747aa8fd7c3894758b98b232f5c74c56ee3bf93f92b5fd2",
-      "file": "bilibili/bilibili-account.a17488a0d58947e72747aa8fd7c3894758b98b232f5c74c56ee3bf93f92b5fd2.bar"
+      "sha256": "ed12f8b11320235f56fe87cb4f87d23a080d73113f01c7c074bf5c34c24d92c3",
+      "file": "bilibili/bilibili-account.ed12f8b11320235f56fe87cb4f87d23a080d73113f01c7c074bf5c34c24d92c3.bar"
     },
     {
       "id": "tinytraffic",
